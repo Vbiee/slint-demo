@@ -1,0 +1,147 @@
+import { Button, CheckBox, LineEdit, Slider } from "std-widgets.slint";
+
+export struct TaskItem {
+    title: string,
+    done: bool,
+}
+
+export component AppWindow inherits Window {
+    title: "Slint Basic Demo";
+    // The Winit surface is alpha-capable on Windows; this lets rounded content
+    // expose the desktop with a smooth anti-aliased edge.
+    background: transparent;
+    preferred-width: 760px;
+    preferred-height: 560px;
+    min-width: 520px;
+    min-height: 380px;
+
+    in-out property <[TaskItem]> tasks;
+    in-out property <string> draft;
+    in-out property <string> status: "Ready";
+    in-out property <float> corner-radius: 0;
+    callback add-task(string);
+    callback toggle-task(int);
+    callback remove-task(int);
+    callback set-window-corner-radius(float);
+
+    Rectangle {
+        background: #171a21;
+        border-radius: root.corner-radius * 1px;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+
+            // Custom replacement for the native Windows title bar.
+            WindowMoveArea {
+                height: 32px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Slint Basic Demo";
+                        color: #aab5c6;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "-";
+                        clicked => { root.minimized = true; }
+                    }
+                    Button {
+                        text: "Max";
+                        clicked => { root.maximized = !root.maximized; }
+                    }
+                    Button {
+                        text: "Close";
+                        clicked => { root.close(); }
+                    }
+                }
+            }
+
+            Text {
+                text: "Slint basic demo";
+                color: #f2f5f9;
+                font-size: 26px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Declarative UI (.slint) + application logic (Rust)";
+                color: #aab5c6;
+                font-size: 15px;
+            }
+
+            Rectangle { height: 1px; background: #303744; }
+
+            HorizontalLayout {
+                spacing: 10px;
+                input := LineEdit {
+                    text <=> root.draft;
+                    placeholder-text: "Add a task…";
+                    accepted => { root.add-task(root.draft); }
+                }
+                Button {
+                    text: "Add task";
+                    clicked => { root.add-task(root.draft); }
+                }
+                VerticalLayout {
+                    width: 150px;
+                    spacing: 2px;
+                    Text {
+                        text: "Corners: " + root.corner-radius + " px";
+                        color: #aab5c6;
+                        font-size: 12px;
+                    }
+                    Slider {
+                        value: root.corner-radius;
+                        minimum: 0;
+                        maximum: 32;
+                        step: 1;
+                        changed(value) => {
+                            root.corner-radius = value;
+                            root.set-window-corner-radius(value);
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: #20242d;
+                border-radius: 8px;
+                clip: true;
+
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 4px;
+                    for task[index] in root.tasks : Rectangle {
+                        height: 38px;
+                        background: task.done ? #203c31 : #282e3a;
+                        border-radius: 5px;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 8px;
+                            spacing: 10px;
+                            CheckBox {
+                                checked: task.done;
+                                toggled => { root.toggle-task(index); }
+                            }
+                            Text {
+                                text: task.title;
+                                color: task.done ? #9ecfb3 : #edf1f7;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: "Remove";
+                                clicked => { root.remove-task(index); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text { text: root.status; color: #aab5c6; font-size: 13px; }
+        }
+    }
+}

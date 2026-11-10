@@ -1,0 +1,4 @@
+[target.x86_64-pc-windows-msvc]
+# Equivalent to the C/C++ runtime option /MT: embed the MSVC CRT in the exe.
+# End users do not need the Visual C++ Redistributable for this application.
+rustflags = ["-C", "target-feature=+crt-static"]
