@@ -1,0 +1,25 @@
+[package]
+name = "slint-explorer-demo"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+slint = { version = "1.18.1", features = ["unstable-winit-030"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+ "Win32_Storage_FileSystem",
+    "Win32_UI_Controls",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+slint-build = "1.18.1"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = "abort"

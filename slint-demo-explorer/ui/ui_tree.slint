@@ -1,0 +1,174 @@
+import { UiScrollView } from "ui_scroll_view.slint";
+
+// Data-only navigation tree. The caller owns the hierarchy and navigation.
+export struct TreeNode {
+    // Non-empty only on the first item of a section.
+    section: string,
+    id: string,
+    label: string,
+    depth: int,
+    expanded: bool,
+    selected: bool,
+    // Caller-owned image. UiTree neither loads nor infers an icon.
+    icon: image,
+}
+
+export component UiTree inherits Rectangle {
+    in property <[TreeNode]> nodes;
+
+    // Layout API
+    in property <length> content-padding: 6px;
+    // The scroll content keeps at least this width. It gives long paths a
+    // genuine horizontal overflow instead of shrinking every row to fit.
+    in property <length> content-min-width: 320px;
+    in property <length> item-gap: 2px;
+    in property <length> section-height: 24px;
+    in property <length> section-font-size: 10px;
+    in property <int> section-font-weight: 600;
+    in property <length> row-height: 30px;
+    in property <length> row-horizontal-padding: 6px;
+    in property <length> row-gap: 4px;
+    in property <length> row-corner-radius: 4px;
+    in property <length> row-font-size: 14px;
+    in property <int> row-font-weight: 400;
+    in property <length> indent-width: 16px;
+    in property <length> expander-size: 16px;
+    in property <length> expander-corner-radius: 3px;
+    in property <length> expander-stroke-width: 2px;
+    in property <length> icon-size: 18px;
+
+    // Color API
+    in property <color> tree-background-color: #1d2129;
+    in property <color> tree-border-color: #303744;
+    in property <length> tree-border-width: 1px;
+    in property <color> section-text-color: #7f8b9e;
+    in property <color> row-background-color: transparent;
+    in property <color> hover-row-color: #273443;
+    in property <color> selected-row-color: #304c70;
+    in property <color> row-text-color: #ccd4df;
+    in property <color> hover-text-color: #f0f4fa;
+    in property <color> selected-text-color: #f4f7fb;
+    in property <color> expander-background-color: #303b4a;
+    in property <color> expander-icon-color: #d4dce8;
+
+    // Forwarded scrollbar theme API
+    in property <length> scrollbar-thumb-width: 6px;
+    in property <length> scrollbar-grab-width: 10px;
+    in property <length> scrollbar-min-thumb-height: 24px;
+    in property <length> scrollbar-inset: 3px;
+    in property <color> scrollbar-track-color: #252b3440;
+    in property <color> scrollbar-thumb-color: #6b77884d;
+    in property <color> scrollbar-thumb-hover-color: #8491a4;
+
+    callback selected(string);
+    callback expansion-toggled(string);
+    callback activated(string);
+
+    background: root.tree-background-color;
+    border-color: root.tree-border-color;
+    border-width: root.tree-border-width;
+    clip: true;
+
+    UiScrollView {
+        width: parent.width;
+        height: parent.height;
+        thumb-width: root.scrollbar-thumb-width;
+        grab-width: root.scrollbar-grab-width;
+        min-thumb-height: root.scrollbar-min-thumb-height;
+        scrollbar-inset: root.scrollbar-inset;
+        track-color: root.scrollbar-track-color;
+        thumb-color: root.scrollbar-thumb-color;
+        thumb-hover-color: root.scrollbar-thumb-hover-color;
+        VerticalLayout {
+            min-width: max(root.width, root.content-min-width);
+            padding: root.content-padding;
+            spacing: root.item-gap;
+            for node in root.nodes : VerticalLayout {
+                spacing: root.item-gap;
+                if node.section != "" : Text {
+                    text: node.section;
+                    height: root.section-height;
+                    color: root.section-text-color;
+                    font-size: root.section-font-size;
+                    font-weight: root.section-font-weight;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    height: root.row-height;
+                    background: node.selected ? root.selected-row-color : ((row-hover.has-hover || expander-hit.has-hover) ? root.hover-row-color : root.row-background-color);
+                    border-radius: root.row-corner-radius;
+                    animate background { duration: 100ms; }
+                    // Declared before the layout so the expander's own input
+                    // area (declared later) keeps its click behaviour.
+                    row-hover := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.selected(node.id); }
+                        double-clicked => { root.activated(node.id); }
+                    }
+                    HorizontalLayout {
+                        padding-left: root.row-horizontal-padding + node.depth * root.indent-width;
+                        padding-right: root.row-horizontal-padding;
+                        spacing: root.row-gap;
+
+                        // Center the fixed-size expander inside the 30px row.
+                        VerticalLayout {
+                            width: root.expander-size;
+                            Rectangle { vertical-stretch: 1; }
+                            Rectangle {
+                                height: root.expander-size;
+                                background: root.expander-background-color;
+                                border-radius: root.expander-corner-radius;
+                                // Vector chevron rather than a + / - glyph:
+                                // predictable on every font and visually closer
+                                // to a native explorer tree.
+                                Path {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    viewbox-width: 20;
+                                    viewbox-height: 20;
+                                    commands: node.expanded
+                                        ? "M 4 7 L 10 13 L 16 7"
+                                        : "M 7 4 L 13 10 L 7 16";
+                                    stroke: root.expander-icon-color;
+                                    stroke-width: root.expander-stroke-width;
+                                    fill: transparent;
+                                }
+                                expander-hit := TouchArea {
+                                    clicked => { root.expansion-toggled(node.id); }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        // The caller's image follows the same vertical center.
+                        VerticalLayout {
+                            width: root.icon-size;
+                            Rectangle { vertical-stretch: 1; }
+                            Image {
+                                height: root.icon-size;
+                                source: node.icon;
+                                image-fit: contain;
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            Text {
+                                x: 0px;
+                                text: node.label;
+                                color: node.selected ? root.selected-text-color : root.row-text-color;
+                                font-size: root.row-font-size;
+                                font-weight: root.row-font-weight;
+                                horizontal-alignment: left;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

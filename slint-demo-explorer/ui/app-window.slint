@@ -1,0 +1,83 @@
+import { Button, LineEdit } from "std-widgets.slint";
+import { UiTree, TreeNode } from "ui_tree.slint";
+import { UiList, ListEntry } from "ui_list.slint";
+
+export component AppWindow inherits Window {
+    title: "Slint Explorer Demo";
+    preferred-width: 1000px;
+    preferred-height: 640px;
+    min-width: 720px;
+    min-height: 440px;
+    background: #171a21;
+
+    in-out property <[TreeNode]> tree-nodes;
+    in-out property <[ListEntry]> list-entries;
+    in-out property <string> location;
+    in-out property <string> status: "Ready";
+    callback navigate-up();
+    callback navigate-to(string);
+    callback tree-selected(string);
+    callback tree-expansion-toggled(string);
+    callback tree-activated(string);
+    callback list-selected(string);
+    callback list-activated(string);
+
+    Rectangle {
+        background: #171a21;
+        VerticalLayout {
+            spacing: 0px;
+            // This header's dimensions match FrameConfig in main.rs. Win32
+            // handles dragging on its left side; these buttons remain Slint UI.
+            Rectangle {
+                height: 44px;
+                background: #202630;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    Text {
+                        text: "Slint Explorer Demo";
+                        color: #d9e0ea;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button { text: "-"; clicked => { root.minimized = true; } }
+                    Button { text: "Max"; clicked => { root.maximized = !root.maximized; } }
+                    Button { text: "Close"; clicked => { root.close(); } }
+                }
+            }
+            VerticalLayout {
+                padding: 14px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: "Up"; clicked => { root.navigate-up(); } }
+                    location-input := LineEdit {
+                        text: root.location;
+                        accepted => { root.navigate-to(self.text); }
+                        horizontal-stretch: 1;
+                    }
+                    Button { text: "Go"; clicked => { root.navigate-to(location-input.text); } }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    tree := UiTree {
+                        width: 230px;
+                        nodes: root.tree-nodes;
+                        selected(id) => { root.tree-selected(id); }
+                        expansion-toggled(id) => { root.tree-expansion-toggled(id); }
+                        activated(id) => { root.tree-activated(id); }
+                    }
+                    list := UiList {
+                        horizontal-stretch: 1;
+                        entries: root.list-entries;
+                        selected(id) => { root.list-selected(id); }
+                        activated(id) => { root.list-activated(id); }
+                    }
+                }
+                Text { text: root.status; color: #aab5c6; font-size: 12px; }
+            }
+        }
+    }
+}

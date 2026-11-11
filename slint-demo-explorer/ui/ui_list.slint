@@ -1,0 +1,72 @@
+import { UiScrollView } from "ui_scroll_view.slint";
+
+// Data-only Explorer details list. It reads no files and emits only IDs.
+export struct ListEntry {
+    id: string,
+    name: string,
+    type-name: string,
+    modified: string,
+    size: string,
+    is-folder: bool,
+    selected: bool,
+}
+
+export component UiList inherits Rectangle {
+    in property <[ListEntry]> entries;
+    // Sum of the details columns plus a usable Name column. This lets the
+    // custom UiScrollView expose a horizontal bar on narrow panes.
+    in property <length> content-min-width: 720px;
+    callback selected(string);
+    callback activated(string);
+
+    background: #171a21;
+    border-color: #303744;
+    border-width: 1px;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 0px;
+        header := Rectangle {
+            height: 32px;
+            background: #252b36;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text { text: "Name"; color: #b8c2d1; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: "Date modified"; color: #b8c2d1; width: 150px; vertical-alignment: center; }
+                Text { text: "Type"; color: #b8c2d1; width: 120px; vertical-alignment: center; }
+                Text { text: "Size"; color: #b8c2d1; width: 90px; horizontal-alignment: right; vertical-alignment: center; }
+            }
+        }
+        UiScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                min-width: max(root.width, root.content-min-width);
+                padding: 6px;
+                spacing: 2px;
+                for entry in root.entries : Rectangle {
+                    height: 34px;
+                    background: entry.selected ? #304c70 : transparent;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 12px;
+                        Text {
+                            text: (entry.is-folder ? "▣  " : "▤  ") + entry.name;
+                            color: entry.selected ? #f4f7fb : #d9e0ea;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        Text { text: entry.modified; color: #aab5c6; width: 150px; vertical-alignment: center; }
+                        Text { text: entry.type-name; color: #aab5c6; width: 120px; vertical-alignment: center; }
+                        Text { text: entry.size; color: #aab5c6; width: 90px; horizontal-alignment: right; vertical-alignment: center; }
+                    }
+                    TouchArea {
+                        clicked => { root.selected(entry.id); }
+                        double-clicked => { root.activated(entry.id); }
+                    }
+                }
+            }
+        }
+    }
+}

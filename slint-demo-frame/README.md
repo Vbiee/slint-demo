@@ -38,7 +38,7 @@ graphics drivers are still supplied by Windows itself.
 
 ## Windows title bar and shadow
 
-`src/windows_chrome.rs` is a standalone Windows-only bridge. It extends the
+`src/ui_slint_win32_frame.rs` is a standalone Windows-only bridge. It extends the
 app client area over the native caption and implements hit testing for dragging
 and resizing. The Slint header can therefore replace the title bar.
 
@@ -48,19 +48,24 @@ normal native window chrome.
 
 ### Reuse in another Slint app
 
-Copy `src/windows_chrome.rs`, enable Slint's `unstable-winit-030` Cargo feature,
+Copy `src/ui_slint_win32_frame.rs`, enable Slint's `unstable-winit-030` Cargo feature,
 and call these three APIs:
 
 ```rust
-windows_chrome::select_alpha_winit_backend()?; // before AppWindow::new()
-windows_chrome::install(&ui.window());         // before ui.show()
-windows_chrome::set_corner_radius(&ui.window(), radius_px);
+ui_slint_win32_frame::select_alpha_winit_backend()?; // before AppWindow::new()
+let frame = ui_slint_win32_frame::FrameConfig {
+    title_bar_height: 64,
+    caption_button_width: 156,
+    border_color: Some(0x0021_1a_17), // COLORREF: RGB(23, 26, 33)
+    ..Default::default()
+};
+ui_slint_win32_frame::install(&ui.window(), frame);  // before ui.show()
+ui_slint_win32_frame::set_corner_radius(&ui.window(), radius_px);
 ```
 
 `radius_px == 0.0` keeps the 1px DWM seam for native shadow; a positive value
-uses a clean alpha corner. Adjust the three constants at the top of the module
-when a product has a different title-bar height, caption-button width, or
-resize hit area.
+uses a clean alpha corner. `FrameConfig` supplies each resize edge, the drag
+area, the caption-button exclusion area, and optional native DWM border color.
 
 ## What to change first
 

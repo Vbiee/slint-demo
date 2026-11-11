@@ -2,7 +2,7 @@
 
 mod core;
 #[cfg(target_os = "windows")]
-mod windows_chrome;
+mod ui_slint_win32_frame;
 
 use crate::core::TaskStore;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -32,7 +32,7 @@ fn refresh(ui: &AppWindow, store: &TaskStore) {
 
 fn main() -> Result<(), slint::PlatformError> {
     #[cfg(target_os = "windows")]
-    windows_chrome::select_alpha_winit_backend()?;
+    ui_slint_win32_frame::select_alpha_winit_backend()?;
 
     let ui = AppWindow::new()?;
     let store = Rc::new(RefCell::new(TaskStore::demo()));
@@ -75,13 +75,13 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_corner_radius(radius);
                 #[cfg(target_os = "windows")]
-                windows_chrome::set_corner_radius(&ui.window(), radius);
+                ui_slint_win32_frame::set_corner_radius(&ui.window(), radius);
             }
         }
     });
 
     #[cfg(target_os = "windows")]
-    windows_chrome::install(&ui.window());
+    ui_slint_win32_frame::install(&ui.window(), ui_slint_win32_frame::FrameConfig::default());
 
     // show() creates the native Winit window. The Windows event handler above
     // then extends the client area through the title bar while retaining DWM.

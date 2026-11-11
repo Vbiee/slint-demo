@@ -1,4 +1,4 @@
-//! Reusable Windows custom-chrome bridge for Slint/Winit.
+//! Reusable Win32 custom-window-frame bridge for Slint/Winit.
 //!
 //! We deliberately keep `WS_OVERLAPPEDWINDOW`: Windows/DWM therefore owns the
 //! resize border, rounded corners and drop shadow.  `WM_NCCALCSIZE` only moves
@@ -12,7 +12,10 @@ use slint::winit_030::{
 use std::{
     cell::Cell,
     rc::Rc,
-    sync::atomic::{AtomicIsize, Ordering},
+    sync::{
+        atomic::{AtomicIsize, Ordering},
+        RwLock,
+    },
 };
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -34,13 +37,44 @@ use windows_sys::Win32::{
     },
 };
 
-const TITLE_BAR_HEIGHT: i32 = 64;
-const CAPTION_BUTTONS_WIDTH: i32 = 156;
-// Slint covers every visible edge. Resize still works through this invisible hit target.
-const RESIZE_HIT_AREA: i32 = 8;
-const DARK_BORDER_COLOR: u32 = 0x0021_1a_17; // COLORREF: RGB(0x17, 0x1a, 0x21)
+/// Geometry for the app's custom title bar and Win32 resize hit targets.
+/// Values are physical pixels because Win32 sends physical pointer coordinates.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameConfig {
+    pub resize_left: i32,
+    pub resize_top: i32,
+    pub resize_right: i32,
+    pub resize_bottom: i32,
+    pub title_bar_height: i32,
+    pub caption_button_width: i32,
+    /// `COLORREF` (`0x00bbggrr`), or `None` to use Windows' default border.
+    pub border_color: Option<u32>,
+}
+
+impl Default for FrameConfig {
+    fn default() -> Self {
+        Self {
+            resize_left: 8,
+            resize_top: 8,
+            resize_right: 8,
+            resize_bottom: 8,
+            title_bar_height: 64,
+            caption_button_width: 156,
+            border_color: Some(0x0021_1a_17), // RGB(0x17, 0x1a, 0x21)
+        }
+    }
+}
 
 static ORIGINAL_WND_PROC: AtomicIsize = AtomicIsize::new(0);
+static FRAME_CONFIG: RwLock<FrameConfig> = RwLock::new(FrameConfig {
+    resize_left: 8,
+    resize_top: 8,
+    resize_right: 8,
+    resize_bottom: 8,
+    title_bar_height: 64,
+    caption_button_width: 156,
+    border_color: Some(0x0021_1a_17),
+});
 
 /// Must be called once, before constructing any Slint component.
 /// It requests an alpha-capable surface for smoothly transparent corners.
@@ -51,7 +85,10 @@ pub fn select_alpha_winit_backend() -> Result<(), slint::PlatformError> {
 }
 
 /// Installs custom non-client handling for one Slint window.
-pub fn install(window: &slint::Window) {
+pub fn install(window: &slint::Window, config: FrameConfig) {
+    *FRAME_CONFIG
+        .write()
+        .expect("window frame config lock poisoned") = config;
     // Winit creates its HWND only when the event loop is active. Install on the
     // first window event so `with_winit_window()` cannot race application startup.
     let installed = Rc::new(Cell::new(false));
@@ -143,16 +180,20 @@ unsafe fn install_for_hwnd(hwnd: HWND) -> bool {
     };
     let _ = unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins) };
 
-    // Windows 11 lets DWM tint the remaining 2px native frame. This removes
-    // the default light border while preserving native resize and shadow.
-    let _ = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_BORDER_COLOR as u32,
-            &DARK_BORDER_COLOR as *const _ as *const _,
-            size_of_val(&DARK_BORDER_COLOR) as u32,
-        )
-    };
+    if let Some(border_color) = FRAME_CONFIG
+        .read()
+        .expect("window frame config lock poisoned")
+        .border_color
+    {
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR as u32,
+                &border_color as *const _ as *const _,
+                size_of_val(&border_color) as u32,
+            )
+        };
+    }
 
     let original =
         unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, title_bar_wnd_proc as *const () as isize) };
@@ -197,36 +238,44 @@ unsafe extern "system" fn title_bar_wnd_proc(
             unsafe { ScreenToClient(hwnd, &mut point) };
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
-            let edge = RESIZE_HIT_AREA;
+            let config = *FRAME_CONFIG
+                .read()
+                .expect("window frame config lock poisoned");
+            let left = config.resize_left.max(0);
+            let top = config.resize_top.max(0);
+            let right = config.resize_right.max(0);
+            let bottom = config.resize_bottom.max(0);
 
             // Let Windows retain all normal resize affordances.
-            if point.y < edge * 2 && point.x < edge * 2 {
+            if point.y < top && point.x < left {
                 return HTTOPLEFT as isize;
             }
-            if point.y < edge * 2 && point.x >= rect.right - edge * 2 {
+            if point.y < top && point.x >= rect.right - right {
                 return HTTOPRIGHT as isize;
             }
-            if point.y >= rect.bottom - edge * 2 && point.x < edge * 2 {
+            if point.y >= rect.bottom - bottom && point.x < left {
                 return HTBOTTOMLEFT as isize;
             }
-            if point.y >= rect.bottom - edge * 2 && point.x >= rect.right - edge * 2 {
+            if point.y >= rect.bottom - bottom && point.x >= rect.right - right {
                 return HTBOTTOMRIGHT as isize;
             }
-            if point.y < edge {
+            if point.y < top {
                 return HTTOP as isize;
             }
-            if point.y >= rect.bottom - edge {
+            if point.y >= rect.bottom - bottom {
                 return HTBOTTOM as isize;
             }
-            if point.x < edge {
+            if point.x < left {
                 return HTLEFT as isize;
             }
-            if point.x >= rect.right - edge {
+            if point.x >= rect.right - right {
                 return HTRIGHT as isize;
             }
 
             // Keep the right-hand buttons as client area, so Slint receives clicks.
-            if point.y < TITLE_BAR_HEIGHT && point.x < rect.right - CAPTION_BUTTONS_WIDTH {
+            if point.y < config.title_bar_height.max(0)
+                && point.x < rect.right - config.caption_button_width.max(0)
+            {
                 return HTCAPTION as isize;
             }
         }
