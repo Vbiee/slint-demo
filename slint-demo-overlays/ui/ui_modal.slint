@@ -1,0 +1,51 @@
+// Generic modal: caller owns visibility, content strings, and action logic.
+export component UiModal inherits Rectangle {
+    in property <bool> open: false;
+    in property <string> title;
+    in property <string> message;
+    in property <string> confirm-label: "Confirm";
+    in property <string> cancel-label: "Cancel";
+    callback confirmed();
+    callback cancelled();
+
+    visible: root.open;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #080b10b8;
+        TouchArea { clicked => { root.cancelled(); } }
+    }
+
+    card := Rectangle {
+        width: min(440px, parent.width - 32px);
+        height: 218px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: #252b36;
+        border-color: #465266;
+        border-width: 1px;
+        border-radius: 10px;
+
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            Text { text: root.title; color: #f2f6fc; font-size: 18px; font-weight: 600; }
+            Text { text: root.message; color: #b5c0d0; wrap: word-wrap; vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { horizontal-stretch: 1; }
+                cancel := Rectangle {
+                    width: 88px; height: 34px; border-radius: 5px; background: #374151;
+                    Text { text: root.cancel-label; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.cancelled(); } }
+                }
+                confirm := Rectangle {
+                    width: 98px; height: 34px; border-radius: 5px; background: #3478c6;
+                    Text { text: root.confirm-label; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.confirmed(); } }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,68 @@
+// A real top-level Slint window. It is deliberately not embedded in AppWindow.
+import { UiTopBar } from "ui_top_bar.slint";
+export component DetachedPopup inherits Window {
+    title: "Detached Slint popup";
+    preferred-width: 420px;
+    preferred-height: 250px;
+    min-width: 320px;
+    min-height: 190px;
+    background: #202733;
+
+    in-out property <string> title-text: "Detached popup";
+    in-out property <string> message: "This is a separate native window managed by PopupWindowManager.";
+    in-out property <bool> topbar-show-minimize: false;
+    in-out property <bool> topbar-show-maximize: false;
+    in-out property <bool> topbar-show-close: true;
+    in-out property <length> topbar-height: 46px;
+    in-out property <length> topbar-title-size: 14px;
+    callback accepted();
+    callback dismissed();
+    callback minimize-requested();
+    callback maximize-requested();
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #202733;
+
+        VerticalLayout {
+            padding: 0px;
+            spacing: 14px;
+            UiTopBar {
+                title: root.title-text;
+                show-minimize: root.topbar-show-minimize;
+                show-maximize: root.topbar-show-maximize;
+                show-close: root.topbar-show-close;
+                bar-height: root.topbar-height;
+                title-size: root.topbar-title-size;
+                minimize-requested => { root.minimize-requested(); }
+                maximize-requested => { root.maximize-requested(); }
+                close-requested => { root.dismissed(); }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: #202733;
+                VerticalLayout {
+                    padding: 22px;
+                    spacing: 14px;
+                    Text { text: root.message; color: #b5c0d0; wrap: word-wrap; vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            width: 88px; height: 34px; border-radius: 5px; background: #374151;
+                            Text { text: "Close"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.dismissed(); } }
+                        }
+                        Rectangle {
+                            width: 92px; height: 34px; border-radius: 5px; background: #3478c6;
+                            Text { text: "Apply"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.accepted(); } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

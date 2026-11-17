@@ -1,0 +1,49 @@
+// Reusable client-side title bar. The caller owns the native window actions.
+export component UiTopBar inherits Rectangle {
+    in property <string> title: "Application";
+    in property <string> logo: "◆";
+    in property <color> title-color: #dce6f4;
+    in property <length> title-size: 14px;
+    in property <string> title-font-family: "";
+    in property <length> bar-height: 46px;
+    in property <color> button-color: #303947;
+    in property <color> button-hover-color: #3c4758;
+    in property <color> button-icon-color: #e2e8f0;
+    in property <color> close-hover-color: #b53b4a;
+    in property <string> minimize-tooltip: "";
+    in property <string> maximize-tooltip: "";
+    in property <string> close-tooltip: "";
+    // Opt in: a compact popup should not expose actions it does not support.
+    in property <bool> show-minimize: false;
+    in property <bool> show-maximize: false;
+    in property <bool> show-close: false;
+    in property <color> bar-background: #202733;
+    callback minimize-requested();
+    callback maximize-requested();
+    callback close-requested();
+
+    height: root.bar-height;
+    background: root.bar-background;
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 6px;
+        spacing: 8px;
+        Text { text: root.logo; color: #72b7ff; font-size: 16px; vertical-alignment: center; }
+        Text { text: root.title; color: #dce6f4; vertical-alignment: center; font-size: 14px; font-weight: 600; horizontal-stretch: 1; }
+        Rectangle {
+            visible: root.show-minimize; width: 38px; height: 34px; border-radius: 5px; background: minimize-hit.has-hover ? #3c4758 : transparent;
+            Text { text: "−"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 18px; }
+            minimize-hit := TouchArea { clicked => { root.minimize-requested(); } }
+        }
+        Rectangle {
+            visible: root.show-maximize; width: 38px; height: 34px; border-radius: 5px; background: maximize-hit.has-hover ? #3c4758 : transparent;
+            Text { text: "□"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 15px; }
+            maximize-hit := TouchArea { clicked => { root.maximize-requested(); } }
+        }
+        Rectangle {
+            visible: root.show-close; width: 42px; height: 34px; border-radius: 5px; background: close-hit.has-hover ? #b53b4a : #303947;
+            Text { text: "×"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 19px; }
+            close-hit := TouchArea { clicked => { root.close-requested(); } }
+        }
+    }
+}

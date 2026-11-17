@@ -1,0 +1,57 @@
+export struct ContextMenuItem {
+    id: string,
+    label: string,
+    enabled: bool,
+    danger: bool,
+}
+
+// Generic context menu. Its owner supplies menu data and absolute anchor.
+export component UiContextMenu inherits Rectangle {
+    in property <bool> open: false;
+    in property <length> anchor-x: 0px;
+    in property <length> anchor-y: 0px;
+    in property <[ContextMenuItem]> items;
+    callback item-triggered(string);
+    callback dismissed();
+
+    visible: root.open;
+
+    // Must be behind the menu so individual rows still receive clicks.
+    dismiss-area := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.dismissed(); }
+    }
+
+    menu := Rectangle {
+        width: 204px;
+        height: min(parent.height - 16px, 12px + root.items.length * 34px);
+        x: min(max(8px, root.anchor-x), parent.width - self.width - 8px);
+        y: min(max(8px, root.anchor-y), parent.height - self.height - 8px);
+        background: #2a313d;
+        border-color: #4a576b;
+        border-width: 1px;
+        border-radius: 7px;
+        clip: true;
+
+        VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            for item in root.items : Rectangle {
+                height: 32px;
+                border-radius: 4px;
+                background: row-hit.has-hover && item.enabled ? #3b4d64 : transparent;
+                Text {
+                    x: 10px;
+                    text: item.label;
+                    color: !item.enabled ? #6e7888 : (item.danger ? #ff9a9a : #e7edf6);
+                    vertical-alignment: center;
+                }
+                row-hit := TouchArea {
+                    enabled: item.enabled;
+                    clicked => { root.item-triggered(item.id); }
+                }
+            }
+        }
+    }
+}

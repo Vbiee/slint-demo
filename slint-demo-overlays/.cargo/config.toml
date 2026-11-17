@@ -1,0 +1,3 @@
+[build]
+# Relative to .cargo/, so clones keep artifacts in this project's target/.
+target-dir = "../target"

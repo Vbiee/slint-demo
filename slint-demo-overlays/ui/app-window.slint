@@ -1,0 +1,134 @@
+import { UiModal } from "ui_modal.slint";
+export { DetachedPopup } from "detached_popup.slint";
+export { DetachedContextMenu } from "detached_context_menu.slint";
+export { ContextMenuItem } from "ui_context_menu.slint";
+
+export component AppWindow inherits Window {
+    title: "Slint Overlay Components";
+    preferred-width: 880px;
+    preferred-height: 560px;
+    min-width: 620px;
+    min-height: 400px;
+    background: #171b22;
+
+    in-out property <bool> modal-open: false;
+    in-out property <string> modal-title: "Delete draft?";
+    in-out property <string> modal-message: "This demonstrates a reusable modal. The Rust caller receives a semantic event, not a button ID.";
+    in-out property <string> status: "Right-click the canvas, or open the modal.";
+    in-out property <string> topbar-title: "Native popup window";
+    in-out property <bool> topbar-minimize: false;
+    in-out property <bool> topbar-maximize: false;
+    in-out property <bool> topbar-close: true;
+    in-out property <int> topbar-height: 46;
+    in-out property <int> topbar-font-size: 14;
+    in-out property <bool> lock-caller: false;
+    in-out property <bool> native-popup-locking: false;
+
+    callback request-modal();
+    callback request-detached-popup();
+    callback request-context-menu(length, length);
+    // Fired when the native popup has locked this caller and intercepted input.
+    callback caller-blocked();
+    callback modal-confirmed();
+    callback modal-cancelled();
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #171b22;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            Text { text: "Reusable overlay components"; color: #f1f5f9; font-size: 24px; font-weight: 600; }
+            Text { text: "Modal and context-menu visuals live in Slint; their state and business actions stay in Rust adapters."; color: #aeb9c9; wrap: word-wrap; }
+            Rectangle {
+                height: 200px;
+                background: #202733;
+                border-color: #354154;
+                border-width: 1px;
+                border-radius: 8px;
+                Text { text: "Right-click anywhere in this canvas"; color: #8f9caf; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                            root.request-context-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    width: 130px;
+                    height: 38px;
+                    background: #3478c6;
+                    border-radius: 5px;
+                    Text { text: "Open modal"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.request-modal(); } }
+                }
+                Rectangle {
+                    width: 178px;
+                    height: 38px;
+                    background: #374151;
+                    border-radius: 5px;
+                    Text { text: "Open detached popup"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.request-detached-popup(); } }
+                }
+                Rectangle {
+                    width: 168px;
+                    height: 38px;
+                    background: #374151;
+                    border-radius: 5px;
+                    Text { text: "Open context menu"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.request-context-menu(264px, 244px); } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Rectangle {
+                height: 126px; background: #202733; border-radius: 8px; border-width: 1px; border-color: #354154;
+                VerticalLayout {
+                    padding: 12px; spacing: 7px;
+                    Text { text: "Topbar playground"; color: #e7edf6; font-weight: 600; }
+                    HorizontalLayout { spacing: 8px;
+                        for option in ["Minimize", "Maximize", "Close"] : Rectangle {
+                            width: 92px; height: 26px; border-radius: 4px;
+                            background: option == "Minimize" ? (root.topbar-minimize ? #3478c6 : #374151) : (option == "Maximize" ? (root.topbar-maximize ? #3478c6 : #374151) : (root.topbar-close ? #3478c6 : #374151));
+                            Text { text: option; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; font-size: 11px; }
+                            TouchArea { clicked => { if (option == "Minimize") { root.topbar-minimize = !root.topbar-minimize; } else if (option == "Maximize") { root.topbar-maximize = !root.topbar-maximize; } else { root.topbar-close = !root.topbar-close; } } }
+                        }
+                    }
+                    HorizontalLayout { spacing: 8px;
+                        Rectangle { width: 136px; height: 26px; border-radius: 4px; background: root.lock-caller ? #3478c6 : #374151; Text { text: root.lock-caller ? "Lock caller: on" : "Lock caller: off"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; font-size: 11px; } TouchArea { clicked => { root.lock-caller = !root.lock-caller; } } }
+                        Rectangle { width: 120px; height: 26px; background: #374151; border-radius: 4px; Text { text: "Height −"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.topbar-height = max(32, root.topbar-height - 2); } } }
+                        Text { text: "Height: " + root.topbar-height + "px   Font: " + root.topbar-font-size + "px"; color: #aeb9c9; vertical-alignment: center; }
+                        Rectangle { width: 120px; height: 26px; background: #374151; border-radius: 4px; Text { text: "Height +"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.topbar-height = min(72, root.topbar-height + 2); } } }
+                        Rectangle { width: 84px; height: 26px; background: #374151; border-radius: 4px; Text { text: "Font +"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.topbar-font-size = min(24, root.topbar-font-size + 1); } } }
+                    }
+                }
+            }
+            Text { text: root.status; color: #91a0b5; font-size: 12px; }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+
+    UiModal {
+        width: parent.width;
+        height: parent.height;
+        open: root.modal-open;
+        title: root.modal-title;
+        message: root.modal-message;
+        confirmed => { root.modal-confirmed(); }
+        cancelled => { root.modal-cancelled(); }
+    }
+    // Native popup may be modeless or may block all input to this caller UI.
+    Rectangle {
+        width: parent.width; height: parent.height; visible: root.native-popup-locking; background: #080b1050;
+        // The scrim owns the event so controls beneath it cannot run. Tell the
+        // caller as well, so it can direct attention back to the real popup.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.caller-blocked(); }
+        }
+    }
+}

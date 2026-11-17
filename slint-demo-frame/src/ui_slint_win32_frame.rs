@@ -11,11 +11,9 @@ use slint::winit_030::{
 };
 use std::{
     cell::Cell,
+    collections::HashMap,
     rc::Rc,
-    sync::{
-        atomic::{AtomicIsize, Ordering},
-        RwLock,
-    },
+    sync::{LazyLock, Mutex},
 };
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -32,7 +30,7 @@ use windows_sys::Win32::{
             CallWindowProcW, DefWindowProcW, GetClientRect, SetWindowLongPtrW, SetWindowPos,
             GWLP_WNDPROC, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT,
             HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER,
-            SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE, WM_NCHITTEST, WNDPROC,
+            SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC,
         },
     },
 };
@@ -65,16 +63,17 @@ impl Default for FrameConfig {
     }
 }
 
-static ORIGINAL_WND_PROC: AtomicIsize = AtomicIsize::new(0);
-static FRAME_CONFIG: RwLock<FrameConfig> = RwLock::new(FrameConfig {
-    resize_left: 8,
-    resize_top: 8,
-    resize_right: 8,
-    resize_bottom: 8,
-    title_bar_height: 64,
-    caption_button_width: 156,
-    border_color: Some(0x0021_1a_17),
-});
+#[derive(Clone, Copy)]
+struct InstalledFrame {
+    original_wnd_proc: isize,
+    config: FrameConfig,
+}
+
+// One process-wide dispatcher is required by Win32, but every HWND has its own
+// original procedure and geometry. This allows main windows and popup windows
+// to use this module simultaneously.
+static INSTALLED_FRAMES: LazyLock<Mutex<HashMap<isize, InstalledFrame>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Must be called once, before constructing any Slint component.
 /// It requests an alpha-capable surface for smoothly transparent corners.
@@ -86,21 +85,25 @@ pub fn select_alpha_winit_backend() -> Result<(), slint::PlatformError> {
 
 /// Installs custom non-client handling for one Slint window.
 pub fn install(window: &slint::Window, config: FrameConfig) {
-    *FRAME_CONFIG
-        .write()
-        .expect("window frame config lock poisoned") = config;
     // Winit creates its HWND only when the event loop is active. Install on the
     // first window event so `with_winit_window()` cannot race application startup.
     let installed = Rc::new(Cell::new(false));
     window.on_winit_window_event(move |window, _event| {
-        if !installed.get() && install_native_hook(window) {
+        if !installed.get() && install_native_hook(window, config) {
             installed.set(true);
         }
         EventResult::Propagate
     });
 }
 
-fn install_native_hook(slint_window: &slint::Window) -> bool {
+/// Installs immediately when the native HWND already exists (for example just
+/// after `ComponentHandle::show()`). Returns false while the window is not
+/// created yet; `install()` remains the deferred, normal setup API.
+pub fn install_now(window: &slint::Window, config: FrameConfig) -> bool {
+    install_native_hook(window, config)
+}
+
+fn install_native_hook(slint_window: &slint::Window, config: FrameConfig) -> bool {
     slint_window
         .with_winit_window(|window| {
             let Ok(handle) = window.window_handle() else {
@@ -111,7 +114,7 @@ fn install_native_hook(slint_window: &slint::Window) -> bool {
             };
 
             // The Slint callback runs on the Winit UI thread, so the HWND is valid here.
-            unsafe { install_for_hwnd(handle.hwnd.get() as HWND) }
+            unsafe { install_for_hwnd(handle.hwnd.get() as HWND, config) }
         })
         .unwrap_or(false)
 }
@@ -166,8 +169,14 @@ pub fn set_corner_radius(slint_window: &slint::Window, radius: f32) {
     });
 }
 
-unsafe fn install_for_hwnd(hwnd: HWND) -> bool {
-    if ORIGINAL_WND_PROC.load(Ordering::Relaxed) != 0 {
+unsafe fn install_for_hwnd(hwnd: HWND, config: FrameConfig) -> bool {
+    let key = hwnd as isize;
+    if let Some(frame) = INSTALLED_FRAMES
+        .lock()
+        .expect("window frame registry lock poisoned")
+        .get_mut(&key)
+    {
+        frame.config = config;
         return true;
     }
 
@@ -180,11 +189,7 @@ unsafe fn install_for_hwnd(hwnd: HWND) -> bool {
     };
     let _ = unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins) };
 
-    if let Some(border_color) = FRAME_CONFIG
-        .read()
-        .expect("window frame config lock poisoned")
-        .border_color
-    {
+    if let Some(border_color) = config.border_color {
         let _ = unsafe {
             DwmSetWindowAttribute(
                 hwnd,
@@ -197,7 +202,16 @@ unsafe fn install_for_hwnd(hwnd: HWND) -> bool {
 
     let original =
         unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, title_bar_wnd_proc as *const () as isize) };
-    ORIGINAL_WND_PROC.store(original, Ordering::Release);
+    INSTALLED_FRAMES
+        .lock()
+        .expect("window frame registry lock poisoned")
+        .insert(
+            key,
+            InstalledFrame {
+                original_wnd_proc: original,
+                config,
+            },
+        );
     let _ = unsafe {
         SetWindowPos(
             hwnd,
@@ -218,6 +232,15 @@ unsafe extern "system" fn title_bar_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message == WM_NCDESTROY {
+        let result = unsafe { call_original(hwnd, message, wparam, lparam) };
+        INSTALLED_FRAMES
+            .lock()
+            .expect("window frame registry lock poisoned")
+            .remove(&(hwnd as isize));
+        return result;
+    }
+
     match message {
         WM_NCCALCSIZE if wparam != 0 => {
             // Claim the full non-client area: top, left, right, and bottom are
@@ -238,9 +261,7 @@ unsafe extern "system" fn title_bar_wnd_proc(
             unsafe { ScreenToClient(hwnd, &mut point) };
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
-            let config = *FRAME_CONFIG
-                .read()
-                .expect("window frame config lock poisoned");
+            let config = frame_for(hwnd).map_or_else(FrameConfig::default, |frame| frame.config);
             let left = config.resize_left.max(0);
             let top = config.resize_top.max(0);
             let right = config.resize_right.max(0);
@@ -286,10 +307,17 @@ unsafe extern "system" fn title_bar_wnd_proc(
 }
 
 unsafe fn call_original(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let procedure = ORIGINAL_WND_PROC.load(Ordering::Acquire);
-    if procedure == 0 {
+    let Some(frame) = frame_for(hwnd) else {
         return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
-    }
-    let procedure: WNDPROC = unsafe { std::mem::transmute(procedure) };
+    };
+    let procedure: WNDPROC = unsafe { std::mem::transmute(frame.original_wnd_proc) };
     unsafe { CallWindowProcW(procedure, hwnd, message, wparam, lparam) }
+}
+
+fn frame_for(hwnd: HWND) -> Option<InstalledFrame> {
+    INSTALLED_FRAMES
+        .lock()
+        .expect("window frame registry lock poisoned")
+        .get(&(hwnd as isize))
+        .copied()
 }
