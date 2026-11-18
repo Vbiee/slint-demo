@@ -69,6 +69,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     },
     )?);
+    context_menu.bind_to_caller(&ui, menu_items);
 
     ui.on_request_modal({
         let ui_weak = ui.as_weak();
@@ -106,9 +107,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak();
         move |x, y| {
             if let Some(ui) = ui_weak.upgrade() {
-                context_menu
-                    .show(&ui, x, y, menu_items())
-                    .expect("failed to show detached context menu");
+                if context_menu.show(&ui, x, y, menu_items()).is_err() {
+                    ui.set_status("Failed to show the detached context menu.".into());
+                }
             }
         }
     });

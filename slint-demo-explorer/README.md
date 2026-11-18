@@ -12,14 +12,25 @@ native resizing, dragging, DWM border color, and the corner/shadow behavior.
 - `src/explorer_model.rs`: filesystem navigation and entries; no Slint/UI code.
 - `ui/ui_tree.slint`: data-driven navigation tree. It accepts `TreeNode` data
   and emits selection/expansion callbacks only.
-- `ui/ui_list.slint`: data-driven details list. It accepts `ListEntry` data
-  and emits selection/activation callbacks only.
-- `src/main.rs`: thin host adapter. It maps the filesystem model to component
-  data and consumes the emitted IDs.
+- `ui/ui_list.slint`: generic, virtualized table. The caller supplies a
+  `ListColumn` schema and `ListRow` cell data; it emits selection, activation,
+  and column-resize callbacks only.
+- `src/main.rs`: thin Explorer host adapter. It maps filesystem data to the
+  generated `AppWindow` properties and consumes the emitted IDs. This is the
+  only place that knows the concrete `AppWindow` type.
 
 To reuse `UiTree` or `UiList`, import its `.slint` file in another window,
-provide the component's data properties, and handle its callbacks. Neither
-component reads the filesystem or performs application commands.
+provide the component's data properties, and handle its callbacks. If Rust
+helpers are wanted, implement the small `ui_tree::Port` and/or `ui_list::Port`
+for that window next to its generated type. Neither component reads the
+filesystem or performs application commands.
+
+`UiList` uses the column schema as its rendering contract. Each column has an
+ID, title, fixed or auto-stretch width (`-1px`), minimum width, alignment, and
+resizability. It may also provide default text/background colors for its header
+and cells. A cell may override either color for that particular row/column and
+may carry a caller-owned `slint::Image` plus its requested size; `UiList` only
+lays it out before the cell text. Missing cells render empty.
 
 ## Build
 

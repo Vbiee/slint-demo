@@ -60,11 +60,9 @@ impl ExplorerModel {
             .flatten()
             .filter_map(|item| Self::entry(item.path()).ok())
             .collect::<Vec<_>>();
-        entries.sort_by(|a, b| {
-            b.is_folder
-                .cmp(&a.is_folder)
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
+        // Compute the case-insensitive sort key once per entry instead of on
+        // every comparator call (which is especially costly for big folders).
+        entries.sort_by_cached_key(|entry| (!entry.is_folder, entry.name.to_lowercase()));
         entries
     }
 

@@ -1,0 +1,3 @@
+[build]
+# All standalone demos share this repository-level artifact cache.
+target-dir = "target"

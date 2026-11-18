@@ -1,70 +1,260 @@
-import { UiScrollView } from "ui_scroll_view.slint";
+import { ListView } from "ui_scroll_view.slint";
 
-// Data-only Explorer details list. It reads no files and emits only IDs.
-export struct ListEntry {
+// Generic table schema. width: -1px means this column shares remaining space
+// with other auto-width columns; alignment: 0 = left, 1 = center, 2 = right.
+export struct ListColumn {
     id: string,
-    name: string,
-    type-name: string,
-    modified: string,
-    size: string,
-    is-folder: bool,
+    title: string,
+    width: length,
+    min-width: length,
+    alignment: int,
+    resizable: bool,
+    text-color: color,
+    has-text-color: bool,
+    background-color: color,
+    has-background-color: bool,
+    header-text-color: color,
+    has-header-text-color: bool,
+    header-background-color: color,
+    has-header-background-color: bool,
+}
+
+export struct ListCell {
+    text: string,
+    // An optional caller-owned image. UiList only lays it out; it never loads
+    // icons or infers them from the text/row.
+    icon: image,
+    has-icon: bool,
+    icon-size: length,
+    text-color: color,
+    has-text-color: bool,
+    background-color: color,
+    has-background-color: bool,
+}
+
+export struct ListRow {
+    id: string,
+    cells: [ListCell],
     selected: bool,
 }
 
+component HeaderColumn inherits Rectangle {
+    in property <ListColumn> column;
+    in property <color> text-color;
+    // `effective-*` is normally derived from `column`, but can be a local
+    // preview while a resize is in progress.  Keeping that preview inside the
+    // list prevents a host model update from recreating this delegate mid-drag.
+    in property <length> effective-width;
+    in property <bool> effective-auto-stretch;
+    in property <length> field-horizontal-padding;
+    callback resize-preview(string, length);
+    callback resize-committed(string, length);
+    callback resize-cancelled();
+
+    width: root.effective-width;
+    horizontal-stretch: root.effective-auto-stretch ? 1 : 0;
+
+    Rectangle {
+        background: root.column.has-header-background-color ? root.column.header-background-color : transparent;
+        border-radius: 2px;
+        x: 1px;
+        y: 2px;
+        width: parent.width - 2px;
+        height: parent.height - 4px;
+    }
+    Text {
+        x: root.field-horizontal-padding;
+        width: parent.width - 2 * root.field-horizontal-padding;
+        height: parent.height;
+        text: root.column.title;
+        color: root.column.has-header-text-color ? root.column.header-text-color : root.text-color;
+        horizontal-alignment: root.column.alignment == 2 ? right : (root.column.alignment == 1 ? center : left);
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        visible: root.column.resizable;
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height - 8px;
+        y: 4px;
+        background: #59627355;
+    }
+    resize-hit := TouchArea {
+        visible: root.column.resizable;
+        x: parent.width - 5px;
+        width: 10px;
+        height: parent.height;
+        mouse-cursor: ew-resize;
+        property <length> start-width;
+        property <length> start-pointer-x;
+        property <length> dragged-width;
+        property <bool> resizing: false;
+        property <bool> has-preview: false;
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start-width = parent.width;
+                // The resize handle moves with the column. Keep pointer
+                // coordinates in window space to avoid a feedback loop.
+                self.start-pointer-x = self.absolute-position.x + self.mouse-x;
+                self.dragged-width = self.start-width;
+                self.resizing = true;
+                self.has-preview = false;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                if (self.resizing && self.has-preview) {
+                    root.resize-committed(root.column.id, self.dragged-width);
+                }
+                self.resizing = false;
+                self.has-preview = false;
+            }
+            if (event.kind == PointerEventKind.cancel) {
+                if (self.resizing && self.has-preview) {
+                    root.resize-cancelled();
+                }
+                self.resizing = false;
+                self.has-preview = false;
+            }
+        }
+        moved => {
+            if (self.pressed && self.resizing) {
+                self.dragged-width = max(root.column.min-width,
+                    self.start-width + (self.absolute-position.x + self.mouse-x)
+                        - self.start-pointer-x);
+                self.has-preview = true;
+                root.resize-preview(root.column.id, self.dragged-width);
+            }
+        }
+    }
+}
+
+// Generic, virtualized data list. The caller owns schema and row data; this
+// component only renders it and emits semantic selection/resize events.
 export component UiList inherits Rectangle {
-    in property <[ListEntry]> entries;
-    // Sum of the details columns plus a usable Name column. This lets the
-    // custom UiScrollView expose a horizontal bar on narrow panes.
-    in property <length> content-min-width: 720px;
+    in property <[ListColumn]> columns;
+    in property <[ListRow]> rows;
+    in property <length> header-height: 32px;
+    in property <length> row-height: 34px;
+    in property <length> row-gap: 2px;
+    in property <length> row-corner-radius: 4px;
+    // Outer space belongs to the whole table; every field gets its own
+    // symmetric inset so adjacent columns do not render flush to each other.
+    in property <length> horizontal-padding: 6px;
+    in property <length> field-horizontal-padding: 6px;
+    in property <color> header-background-color: #252b36;
+    in property <color> header-text-color: #b8c2d1;
+    in property <color> row-text-color: #d9e0ea;
+    in property <color> selected-row-color: #304c70;
+    in property <color> selected-text-color: #f4f7fb;
+    in property <length> icon-text-gap: 6px;
+    in-out property <length> content-x: 0px;
+    // Resizing is a purely local preview.  The host receives one committed
+    // width only after the pointer is released.
+    private property <string> resizing-column-id: "";
+    private property <length> resizing-column-width: 0px;
     callback selected(string);
     callback activated(string);
+    callback column-resized(string, length);
 
     background: #171a21;
-    border-color: #303744;
+    // Debug boundary: this is the complete area owned and painted by UiList.
+    border-color: #ff3b30;
     border-width: 1px;
     clip: true;
 
     VerticalLayout {
         spacing: 0px;
         header := Rectangle {
-            height: 32px;
-            background: #252b36;
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                Text { text: "Name"; color: #b8c2d1; horizontal-stretch: 1; vertical-alignment: center; }
-                Text { text: "Date modified"; color: #b8c2d1; width: 150px; vertical-alignment: center; }
-                Text { text: "Type"; color: #b8c2d1; width: 120px; vertical-alignment: center; }
-                Text { text: "Size"; color: #b8c2d1; width: 90px; horizontal-alignment: right; vertical-alignment: center; }
+            height: root.header-height;
+            background: root.header-background-color;
+            clip: true;
+            header-content := Rectangle {
+                x: root.content-x;
+                width: max(root.width, list.content-width);
+                height: parent.height;
+                HorizontalLayout {
+                    padding-left: root.horizontal-padding;
+                    padding-right: root.horizontal-padding;
+                    for column in root.columns : HeaderColumn {
+                        column: column;
+                        text-color: root.header-text-color;
+                        field-horizontal-padding: root.field-horizontal-padding;
+                        effective-width: root.resizing-column-id == column.id
+                            ? root.resizing-column-width
+                            : (column.width < 0px ? column.min-width : column.width);
+                        effective-auto-stretch: root.resizing-column-id != column.id
+                            && column.width < 0px;
+                        resize-preview(id, width) => {
+                            root.resizing-column-id = id;
+                            root.resizing-column-width = width;
+                        }
+                        resize-committed(id, width) => {
+                            root.column-resized(id, width);
+                            root.resizing-column-id = "";
+                        }
+                        resize-cancelled => {
+                            root.resizing-column-id = "";
+                        }
+                    }
+                }
             }
         }
-        UiScrollView {
+        // ListView virtualizes this direct repeater while retaining the
+        // project-owned scrollbar from ui_scroll_view.slint.
+        list := ListView {
             vertical-stretch: 1;
-            VerticalLayout {
-                min-width: max(root.width, root.content-min-width);
-                padding: 6px;
-                spacing: 2px;
-                for entry in root.entries : Rectangle {
-                    height: 34px;
-                    background: entry.selected ? #304c70 : transparent;
-                    border-radius: 4px;
+            content-x <=> root.content-x;
+            for row in root.rows : Rectangle {
+                height: root.row-height + root.row-gap;
+                row-background := Rectangle {
+                    y: root.row-gap / 2;
+                    height: root.row-height;
+                    width: parent.width;
+                    background: row.selected ? root.selected-row-color : transparent;
+                    border-radius: root.row-corner-radius;
                     HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 12px;
-                        Text {
-                            text: (entry.is-folder ? "▣  " : "▤  ") + entry.name;
-                            color: entry.selected ? #f4f7fb : #d9e0ea;
-                            horizontal-stretch: 1;
-                            vertical-alignment: center;
+                        padding-left: root.horizontal-padding;
+                        padding-right: root.horizontal-padding;
+                        for column[index] in root.columns : Rectangle {
+                            property <ListCell> cell: index < row.cells.length
+                                ? row.cells[index]
+                                : { text: "", icon: @image-url(""), has-icon: false, icon-size: 0px, text-color: transparent, has-text-color: false, background-color: transparent, has-background-color: false };
+                            width: root.resizing-column-id == column.id
+                                ? root.resizing-column-width
+                                : (column.width < 0px ? column.min-width : column.width);
+                            horizontal-stretch: root.resizing-column-id != column.id
+                                && column.width < 0px ? 1 : 0;
+                            background: self.cell.has-background-color ? self.cell.background-color : (column.has-background-color ? column.background-color : transparent);
+                            Image {
+                                visible: parent.cell.has-icon;
+                                x: root.field-horizontal-padding;
+                                y: (parent.height - self.height) / 2;
+                                width: parent.cell.icon-size;
+                                height: parent.cell.icon-size;
+                                source: parent.cell.icon;
+                                image-fit: contain;
+                            }
+                            Text {
+                                x: root.field-horizontal-padding + (parent.cell.has-icon
+                                    ? parent.cell.icon-size + root.icon-text-gap
+                                    : 0px);
+                                width: parent.width - self.x - root.field-horizontal-padding;
+                                height: parent.height;
+                                text: parent.cell.text;
+                                color: parent.cell.has-text-color ? parent.cell.text-color : (column.has-text-color ? column.text-color : (row.selected ? root.selected-text-color : root.row-text-color));
+                                horizontal-alignment: column.alignment == 2 ? right : (column.alignment == 1 ? center : left);
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
                         }
-                        Text { text: entry.modified; color: #aab5c6; width: 150px; vertical-alignment: center; }
-                        Text { text: entry.type-name; color: #aab5c6; width: 120px; vertical-alignment: center; }
-                        Text { text: entry.size; color: #aab5c6; width: 90px; horizontal-alignment: right; vertical-alignment: center; }
                     }
-                    TouchArea {
-                        clicked => { root.selected(entry.id); }
-                        double-clicked => { root.activated(entry.id); }
-                    }
+                }
+                TouchArea {
+                    y: row-background.y;
+                    height: row-background.height;
+                    clicked => { root.selected(row.id); }
+                    double-clicked => { root.activated(row.id); }
                 }
             }
         }

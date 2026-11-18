@@ -5,7 +5,7 @@ mod explorer_model;
 mod ui_slint_win32_frame;
 
 use crate::explorer_model::ExplorerModel;
-use slint::{ComponentHandle, Image, ModelRc, SharedString, VecModel};
+use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -16,7 +16,139 @@ use std::{
 
 slint::include_modules!();
 
+mod ui_list;
 mod ui_tree;
+
+fn transparent_color() -> Color {
+    Color::from_argb_u8(0, 0, 0, 0)
+}
+
+// AppWindow is the Explorer host. Keeping this generated-Slint bridge here
+// means ui_tree and ui_list never depend on a particular window type.
+impl ui_tree::Port for AppWindow {
+    fn replace_nodes(&self, nodes: Vec<ui_tree::Node>) {
+        let nodes = nodes
+            .into_iter()
+            .map(|node| TreeNode {
+                section: node.section.into(),
+                id: node.id.into(),
+                label: node.label.into(),
+                depth: node.depth,
+                expanded: node.expanded,
+                selected: node.selected,
+                icon: node.icon,
+            })
+            .collect::<Vec<_>>();
+        self.set_tree_nodes(ModelRc::new(VecModel::from(nodes)));
+    }
+
+    fn on_selected(&self, callback: impl Fn(String) + 'static) {
+        self.on_tree_selected(move |id| callback(id.to_string()));
+    }
+
+    fn on_expansion_toggled(&self, callback: impl Fn(String) + 'static) {
+        self.on_tree_expansion_toggled(move |id| callback(id.to_string()));
+    }
+
+    fn on_activated(&self, callback: impl Fn(String) + 'static) {
+        self.on_tree_activated(move |id| callback(id.to_string()));
+    }
+}
+
+impl ui_list::Port for AppWindow {
+    fn replace_columns(&self, columns: Vec<ui_list::Column>) {
+        let columns = columns
+            .into_iter()
+            .map(|column| ListColumn {
+                id: column.id.into(),
+                title: column.title.into(),
+                width: column.width,
+                min_width: column.min_width,
+                alignment: column.alignment,
+                resizable: column.resizable,
+                text_color: column.text_color.unwrap_or_else(transparent_color),
+                has_text_color: column.text_color.is_some(),
+                background_color: column.background_color.unwrap_or_else(transparent_color),
+                has_background_color: column.background_color.is_some(),
+                header_text_color: column.header_text_color.unwrap_or_else(transparent_color),
+                has_header_text_color: column.header_text_color.is_some(),
+                header_background_color: column.header_background_color.unwrap_or_else(transparent_color),
+                has_header_background_color: column.header_background_color.is_some(),
+            })
+            .collect::<Vec<_>>();
+        self.set_list_columns(ModelRc::new(VecModel::from(columns)));
+    }
+
+    fn set_column_width(&self, id: &str, width: f32) {
+        let columns = self.get_list_columns();
+        for row in 0..columns.row_count() {
+            let Some(mut column) = columns.row_data(row) else {
+                continue;
+            };
+            if column.id.as_str() == id {
+                column.width = width;
+                columns.set_row_data(row, column);
+                break;
+            }
+        }
+    }
+
+    fn replace_rows(&self, rows: Vec<ui_list::Row>) {
+        let rows = rows
+            .into_iter()
+            .map(|row| ListRow {
+                id: row.id.into(),
+                cells: ModelRc::new(VecModel::from(
+                    row.cells
+                        .into_iter()
+                        .map(|cell| {
+                            let has_icon = cell.icon.is_some();
+                            ListCell {
+                                text: cell.text.into(),
+                                icon: cell.icon.unwrap_or_default(),
+                                has_icon,
+                                icon_size: cell.icon_size,
+                                text_color: cell.text_color.unwrap_or_else(transparent_color),
+                                has_text_color: cell.text_color.is_some(),
+                                background_color: cell.background_color.unwrap_or_else(transparent_color),
+                                has_background_color: cell.background_color.is_some(),
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+                selected: row.selected,
+            })
+            .collect::<Vec<_>>();
+        self.set_list_rows(ModelRc::new(VecModel::from(rows)));
+    }
+
+    fn set_selected(&self, id: &str) {
+        // With UiList's virtual ListView, only visible delegates redraw.
+        let rows = self.get_list_rows();
+        for row in 0..rows.row_count() {
+            let Some(mut item) = rows.row_data(row) else {
+                continue;
+            };
+            let selected = item.id.as_str() == id;
+            if item.selected != selected {
+                item.selected = selected;
+                rows.set_row_data(row, item);
+            }
+        }
+    }
+
+    fn on_selected(&self, callback: impl Fn(String) + 'static) {
+        self.on_list_selected(move |id| callback(id.to_string()));
+    }
+
+    fn on_activated(&self, callback: impl Fn(String) + 'static) {
+        self.on_list_activated(move |id| callback(id.to_string()));
+    }
+
+    fn on_column_resized(&self, callback: impl Fn(String, f32) + 'static) {
+        self.on_list_column_resized(move |id, width| callback(id.to_string(), width));
+    }
+}
 
 const MAX_TREE_DEPTH: usize = 5;
 const MAX_CHILDREN_PER_NODE: usize = 80;
@@ -25,11 +157,13 @@ const MAX_CHILDREN_PER_NODE: usize = 80;
 // these demo assets with its own cache of Win32 shell icons, app icons, etc.
 const DRIVE_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3" fill="#6f9bc8"/><rect x="5" y="8" width="14" height="3" rx="1" fill="#d9edff"/><circle cx="17" cy="15" r="1.4" fill="#233242"/></svg>"##;
 const FOLDER_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 6.5A2.5 2.5 0 0 1 4.5 4H10l2 2.5h7.5A2.5 2.5 0 0 1 22 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 17.5Z" fill="#d4a94d"/><path d="M2.5 9h19v2h-19z" fill="#f0d27b"/></svg>"##;
+const FILE_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9l5 5v14H5Z" fill="#9aabc0"/><path d="M14 2.5v5h5" fill="#dce7f5"/><path d="M8 12h8M8 15h8M8 18h5" stroke="#526176" stroke-width="1.5" stroke-linecap="round"/></svg>"##;
 
 #[derive(Clone)]
 struct TreeIcons {
     drive: Image,
     folder: Image,
+    file: Image,
 }
 
 impl TreeIcons {
@@ -37,6 +171,7 @@ impl TreeIcons {
         Self {
             drive: Image::load_from_svg_data(DRIVE_ICON_SVG).unwrap_or_default(),
             folder: Image::load_from_svg_data(FOLDER_ICON_SVG).unwrap_or_default(),
+            file: Image::load_from_svg_data(FILE_ICON_SVG).unwrap_or_default(),
         }
     }
 
@@ -193,6 +328,15 @@ fn expand_location_ancestors(model: &ExplorerModel, expanded: &mut HashSet<Strin
     }
 }
 
+fn explorer_columns() -> Vec<ui_list::Column> {
+    vec![
+        ui_list::Column { id: "name".into(), title: "Name".into(), width: -1.0, min_width: 220.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "modified".into(), title: "Date modified".into(), width: 150.0, min_width: 110.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "type".into(), title: "Type".into(), width: 120.0, min_width: 90.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "size".into(), title: "Size".into(), width: 90.0, min_width: 70.0, alignment: 2, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+    ]
+}
+
 fn refresh(
     ui: &AppWindow,
     model: &ExplorerModel,
@@ -200,31 +344,36 @@ fn refresh(
     expanded: &HashSet<String>,
     folder_cache: &mut HashMap<PathBuf, Vec<PathBuf>>,
     icons: &TreeIcons,
+    reload_list: bool,
 ) {
     ui.set_location(model.location().display().to_string().into());
-    ui_tree::set_nodes(ui, build_tree_nodes(
-        model,
-        expanded,
-        folder_cache,
-        icons,
-    ));
+    ui_tree::set_nodes(ui, build_tree_nodes(model, expanded, folder_cache, icons));
 
-    let entries = model
-        .entries()
-        .into_iter()
-        .map(|entry| ListEntry {
-            selected: entry.path.to_string_lossy() == selected,
-            id: entry.path.to_string_lossy().into_owned().into(),
-            name: entry.name.into(),
-            type_name: entry.type_name.into(),
-            modified: entry.modified.into(),
-            size: entry.size.into(),
-            is_folder: entry.is_folder,
-        })
-        .collect::<Vec<_>>();
-    let count = entries.len();
-    ui.set_list_entries(ModelRc::new(VecModel::from(entries)));
-    ui.set_status(format!("{count} items · {}", model.location().display()).into());
+    if reload_list {
+        let entries = model
+            .entries()
+            .into_iter()
+            .map(|entry| ui_list::Row {
+                selected: entry.path.to_string_lossy() == selected,
+                id: entry.path.to_string_lossy().into_owned().into(),
+                cells: vec![
+                    ui_list::Cell {
+                        text: entry.name,
+                        icon: Some(if entry.is_folder { icons.folder.clone() } else { icons.file.clone() }),
+                        icon_size: 18.0,
+                        text_color: None,
+                        background_color: None,
+                    },
+                    ui_list::Cell { text: entry.modified, icon: None, icon_size: 0.0, text_color: None, background_color: None },
+                    ui_list::Cell { text: entry.type_name, icon: None, icon_size: 0.0, text_color: None, background_color: None },
+                    ui_list::Cell { text: entry.size, icon: None, icon_size: 0.0, text_color: None, background_color: None },
+                ],
+            })
+            .collect::<Vec<_>>();
+        let count = entries.len();
+        ui_list::set_rows(ui, entries);
+        ui.set_status(format!("{count} items · {}", model.location().display()).into());
+    }
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -235,8 +384,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let model = Rc::new(RefCell::new(ExplorerModel::new()));
     let selected = Rc::new(RefCell::new(String::new()));
     let expanded = Rc::new(RefCell::new(HashSet::new()));
+    let columns = Rc::new(RefCell::new(explorer_columns()));
     let folder_cache = Rc::new(RefCell::new(HashMap::new()));
     let icons = Rc::new(TreeIcons::load());
+    ui_list::set_columns(&ui, columns.borrow().clone());
     expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
     refresh(
         &ui,
@@ -245,6 +396,7 @@ fn main() -> Result<(), slint::PlatformError> {
         &expanded.borrow(),
         &mut folder_cache.borrow_mut(),
         &icons,
+        true,
     );
 
     ui.on_navigate_up({
@@ -259,7 +411,15 @@ fn main() -> Result<(), slint::PlatformError> {
             selected.borrow_mut().clear();
             expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
             if let Some(ui) = ui_weak.upgrade() {
-                refresh(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &mut folder_cache.borrow_mut(), &icons);
+                refresh(
+                    &ui,
+                    &model.borrow(),
+                    &selected.borrow(),
+                    &expanded.borrow(),
+                    &mut folder_cache.borrow_mut(),
+                    &icons,
+                    true,
+                );
             }
         }
     });
@@ -276,7 +436,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
             }
             if let Some(ui) = ui_weak.upgrade() {
-                refresh(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &mut folder_cache.borrow_mut(), &icons);
+                refresh(
+                    &ui,
+                    &model.borrow(),
+                    &selected.borrow(),
+                    &expanded.borrow(),
+                    &mut folder_cache.borrow_mut(),
+                    &icons,
+                    true,
+                );
             }
         }
     });
@@ -288,53 +456,76 @@ fn main() -> Result<(), slint::PlatformError> {
         let folder_cache = folder_cache.clone();
         let icons = icons.clone();
         move |event| {
-            match event {
+            let reload_list = match event {
                 ui_tree::Event::Selected(id) | ui_tree::Event::Activated(id) => {
-                    if model.borrow_mut().navigate(PathBuf::from(id)) {
+                    let navigated = model.borrow_mut().navigate(PathBuf::from(id));
+                    if navigated {
                         selected.borrow_mut().clear();
                         expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
                     }
+                    navigated
                 }
                 ui_tree::Event::ExpansionToggled(id) => {
                     let mut expanded = expanded.borrow_mut();
                     if !expanded.insert(id.clone()) {
                         expanded.remove(&id);
                     }
+                    false
+                }
+            };
+            if let Some(ui) = ui_weak.upgrade() {
+                refresh(
+                    &ui,
+                    &model.borrow(),
+                    &selected.borrow(),
+                    &expanded.borrow(),
+                    &mut folder_cache.borrow_mut(),
+                    &icons,
+                    reload_list,
+                );
+            }
+        }
+    });
+    ui_list::bind(&ui, {
+        let ui_weak = ui.as_weak();
+        let model = model.clone();
+        let selected = selected.clone();
+        let expanded = expanded.clone();
+        let folder_cache = folder_cache.clone();
+        let icons = icons.clone();
+        let columns = columns.clone();
+        move |event| match event {
+            ui_list::Event::Selected(id) => {
+                *selected.borrow_mut() = id;
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui_list::set_selected(&ui, &selected.borrow());
                 }
             }
-            if let Some(ui) = ui_weak.upgrade() {
-                refresh(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &mut folder_cache.borrow_mut(), &icons);
+            ui_list::Event::Activated(id) => {
+                if model.borrow_mut().navigate(PathBuf::from(id)) {
+                    selected.borrow_mut().clear();
+                    expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
+                    if let Some(ui) = ui_weak.upgrade() {
+                        refresh(
+                            &ui,
+                            &model.borrow(),
+                            &selected.borrow(),
+                            &expanded.borrow(),
+                            &mut folder_cache.borrow_mut(),
+                            &icons,
+                            true,
+                        );
+                    }
+                }
             }
-        }
-    });
-    ui.on_list_selected({
-        let ui_weak = ui.as_weak();
-        let model = model.clone();
-        let selected = selected.clone();
-        let expanded = expanded.clone();
-        let folder_cache = folder_cache.clone();
-        let icons = icons.clone();
-        move |id: SharedString| {
-            *selected.borrow_mut() = id.to_string();
-            if let Some(ui) = ui_weak.upgrade() {
-                refresh(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &mut folder_cache.borrow_mut(), &icons);
-            }
-        }
-    });
-    ui.on_list_activated({
-        let ui_weak = ui.as_weak();
-        let model = model.clone();
-        let selected = selected.clone();
-        let expanded = expanded.clone();
-        let folder_cache = folder_cache.clone();
-        let icons = icons.clone();
-        move |id: SharedString| {
-            if model.borrow_mut().navigate(PathBuf::from(id.to_string())) {
-                selected.borrow_mut().clear();
-                expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
-            }
-            if let Some(ui) = ui_weak.upgrade() {
-                refresh(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &mut folder_cache.borrow_mut(), &icons);
+            ui_list::Event::ColumnResized { id, width } => {
+                let mut columns = columns.borrow_mut();
+                if let Some(column) = columns.iter_mut().find(|column| column.id == id) {
+                    column.width = width;
+                }
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui_list::set_column_width(&ui, &id, width);
+                }
             }
         }
     });

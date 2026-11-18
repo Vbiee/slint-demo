@@ -1,6 +1,6 @@
 import { Button, LineEdit } from "std-widgets.slint";
 import { UiTree, TreeNode } from "ui_tree.slint";
-import { UiList, ListEntry } from "ui_list.slint";
+import { UiList, ListColumn, ListRow } from "ui_list.slint";
 
 export component AppWindow inherits Window {
     title: "Slint Explorer Demo";
@@ -11,7 +11,8 @@ export component AppWindow inherits Window {
     background: #171a21;
 
     in-out property <[TreeNode]> tree-nodes;
-    in-out property <[ListEntry]> list-entries;
+    in-out property <[ListColumn]> list-columns;
+    in-out property <[ListRow]> list-rows;
     in-out property <string> location;
     in-out property <string> status: "Ready";
     callback navigate-up();
@@ -21,6 +22,7 @@ export component AppWindow inherits Window {
     callback tree-activated(string);
     callback list-selected(string);
     callback list-activated(string);
+    callback list-column-resized(string, length);
 
     Rectangle {
         background: #171a21;
@@ -71,9 +73,11 @@ export component AppWindow inherits Window {
                     }
                     list := UiList {
                         horizontal-stretch: 1;
-                        entries: root.list-entries;
+                        columns: root.list-columns;
+                        rows: root.list-rows;
                         selected(id) => { root.list-selected(id); }
                         activated(id) => { root.list-activated(id); }
+                        column-resized(id, width) => { root.list-column-resized(id, width); }
                     }
                 }
                 Text { text: root.status; color: #aab5c6; font-size: 12px; }

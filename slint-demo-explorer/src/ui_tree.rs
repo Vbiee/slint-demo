@@ -1,11 +1,10 @@
 //! Slint adapter for the reusable tree view.
 //!
-//! This module has no filesystem knowledge. A caller supplies nodes and
-//! receives semantic events; `ui_tree.slint` remains only the visual/input
-//! implementation.
+//! This module has no filesystem knowledge and does not know which Slint
+//! window hosts it. A host implements [`Port`] to connect its generated Slint
+//! properties and callbacks to this view API.
 
-use crate::{AppWindow, TreeNode};
-use slint::{Image, ModelRc, SharedString, VecModel};
+use slint::Image;
 
 #[derive(Clone)]
 pub struct Node {
@@ -24,34 +23,31 @@ pub enum Event {
     Activated(String),
 }
 
-/// Replace the rendered tree while keeping Slint-specific model types here.
-pub fn set_nodes(ui: &AppWindow, nodes: Vec<Node>) {
-    let nodes = nodes
-        .into_iter()
-        .map(|node| TreeNode {
-            section: node.section.into(),
-            id: node.id.into(),
-            label: node.label.into(),
-            depth: node.depth,
-            expanded: node.expanded,
-            selected: node.selected,
-            icon: node.icon,
-        })
-        .collect::<Vec<_>>();
-    ui.set_tree_nodes(ModelRc::new(VecModel::from(nodes)));
+/// The small host-side bridge required by the view. Implement this next to
+/// the generated window type, not inside this reusable module.
+pub trait Port {
+    fn replace_nodes(&self, nodes: Vec<Node>);
+    fn on_selected(&self, callback: impl Fn(String) + 'static);
+    fn on_expansion_toggled(&self, callback: impl Fn(String) + 'static);
+    fn on_activated(&self, callback: impl Fn(String) + 'static);
 }
 
-/// Forward UI callbacks as caller-level events.
-pub fn bind(ui: &AppWindow, on_event: impl Fn(Event) + 'static) {
+/// Replace all rendered nodes through the host bridge.
+pub fn set_nodes(port: &impl Port, nodes: Vec<Node>) {
+    port.replace_nodes(nodes);
+}
+
+/// Forward host callbacks as view-level semantic events.
+pub fn bind(port: &impl Port, on_event: impl Fn(Event) + 'static) {
     let on_event = std::rc::Rc::new(on_event);
 
-    ui.on_tree_selected({
+    port.on_selected({
         let on_event = on_event.clone();
-        move |id: SharedString| on_event(Event::Selected(id.to_string()))
+        move |id| on_event(Event::Selected(id))
     });
-    ui.on_tree_expansion_toggled({
+    port.on_expansion_toggled({
         let on_event = on_event.clone();
-        move |id: SharedString| on_event(Event::ExpansionToggled(id.to_string()))
+        move |id| on_event(Event::ExpansionToggled(id))
     });
-    ui.on_tree_activated(move |id: SharedString| on_event(Event::Activated(id.to_string())));
+    port.on_activated(move |id| on_event(Event::Activated(id)));
 }

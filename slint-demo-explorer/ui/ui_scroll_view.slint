@@ -15,9 +15,13 @@ export component UiScrollView inherits Rectangle {
     in property <color> thumb-color: #6b77884d;
     in property <color> thumb-hover-color: #8491a4;
     out property <length> content-height <=> flickable.content-height;
-    out property <length> content-y <=> flickable.content-y;
+    in-out property <length> content-y <=> flickable.content-y;
     out property <length> content-width <=> flickable.content-width;
-    out property <length> content-x <=> flickable.content-x;
+    in-out property <length> content-x <=> flickable.content-x;
+    // These are also the contract Slint uses to virtualize a repeater hosted
+    // by the ListView specialization below.
+    out property <length> visible-height <=> flickable.height;
+    out property <length> visible-width <=> flickable.width;
     property <length> vertical-maximum: max(0px, flickable.content-height - flickable.height);
     property <length> horizontal-maximum: max(0px, flickable.content-width - flickable.width);
     property <bool> vertical-scrollbar-visible: root.vertical-maximum > 0px;
@@ -136,3 +140,8 @@ export component UiScrollView inherits Rectangle {
         animate background { duration: 120ms; }
     }
 }
+
+// The compiler recognizes a component named ListView with the five scroll
+// geometry properties above and virtualizes its direct `for` child. Keeping
+// it on top of UiScrollView preserves our theme-owned scrollbar.
+export component ListView inherits UiScrollView { }

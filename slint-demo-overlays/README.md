@@ -32,9 +32,15 @@ detached native context menu, and a detached native Slint window. Right-clicking
 the canvas opens the native context menu at the pointer position; activating
 another window dismisses it.
 
-`ContextMenuWindowManager::new()` accepts `ContextMenuOptions`. Its default
-`corner_radius: 0.0` uses the reusable Win32 frame and native DWM shadow. Pass
-a positive `corner_radius` to use the frameless rounded presentation instead.
+`ContextMenuWindowManager::bind_to_caller()` owns the caller association. When
+the menu loses focus while the right mouse button is down over that caller, it
+replaces the menu at the pointer immediately without a caller-side workaround.
+
+`ContextMenuWindowManager::new()` accepts `ContextMenuOptions { style }`.
+`ContextMenuStyle::default()` uses the reusable Win32 frame and native DWM
+shadow. A positive `style.corner_radius` uses the frameless rounded
+presentation instead. The style also exposes menu/entry dimensions, padding,
+backgrounds, borders, text colors, hover color, and `entry_corner_radius`.
 
 ```text
 ui/ui_modal.slint         visual + primitive input của modal
