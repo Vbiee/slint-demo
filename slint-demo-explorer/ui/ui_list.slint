@@ -145,9 +145,17 @@ export component UiList inherits Rectangle {
     in property <color> header-background-color: #252b36;
     in property <color> header-text-color: #b8c2d1;
     in property <color> row-text-color: #d9e0ea;
+    in property <color> hover-row-color: #273443;
+    in property <color> hover-text-color: #f0f4fa;
     in property <color> selected-row-color: #304c70;
     in property <color> selected-text-color: #f4f7fb;
     in property <length> icon-text-gap: 6px;
+    // The default component slot is the status area. The caller owns every
+    // visual inside it; UiList only reserves and positions that area.
+    in property <bool> status-visible: false;
+    in property <bool> status-at-top: false;
+    in property <length> status-height: 26px;
+    in property <length> corner-radius: 0px;
     in-out property <length> content-x: 0px;
     // Resizing is a purely local preview.  The host receives one committed
     // width only after the pointer is released.
@@ -161,14 +169,18 @@ export component UiList inherits Rectangle {
     // Debug boundary: this is the complete area owned and painted by UiList.
     border-color: #ff3b30;
     border-width: 1px;
+    border-radius: root.corner-radius;
     clip: true;
 
-    VerticalLayout {
-        spacing: 0px;
-        header := Rectangle {
-            height: root.header-height;
-            background: root.header-background-color;
-            clip: true;
+    header := Rectangle {
+        x: 0px;
+        y: root.status-visible && root.status-at-top ? root.status-height : 0px;
+        width: parent.width;
+        height: root.header-height;
+        background: root.header-background-color;
+        clip: true;
+        border-top-left-radius: root.status-visible && root.status-at-top ? 0px : root.corner-radius;
+        border-top-right-radius: root.status-visible && root.status-at-top ? 0px : root.corner-radius;
             header-content := Rectangle {
                 x: root.content-x;
                 width: max(root.width, list.content-width);
@@ -199,20 +211,36 @@ export component UiList inherits Rectangle {
                     }
                 }
             }
-        }
-        // ListView virtualizes this direct repeater while retaining the
-        // project-owned scrollbar from ui_scroll_view.slint.
-        list := ListView {
-            vertical-stretch: 1;
-            content-x <=> root.content-x;
+    }
+    // ListView virtualizes this direct repeater while retaining the
+    // project-owned scrollbar from ui_scroll_view.slint.
+    list := ListView {
+        x: 0px;
+        y: header.y + header.height;
+        width: parent.width;
+        height: parent.height - self.y
+            - (root.status-visible && !root.status-at-top ? root.status-height : 0px);
+        content-x <=> root.content-x;
             for row in root.rows : Rectangle {
                 height: root.row-height + root.row-gap;
+                // This is declared before the visual row so the latter can
+                // consume its hover state while the TouchArea still owns the
+                // semantic selection/activation interaction.
+                row-hover := TouchArea {
+                    y: root.row-gap / 2;
+                    width: parent.width;
+                    height: root.row-height;
+                    clicked => { root.selected(row.id); }
+                    double-clicked => { root.activated(row.id); }
+                }
                 row-background := Rectangle {
                     y: root.row-gap / 2;
                     height: root.row-height;
                     width: parent.width;
-                    background: row.selected ? root.selected-row-color : transparent;
+                    background: row.selected ? root.selected-row-color
+                        : (row-hover.has-hover ? root.hover-row-color : transparent);
                     border-radius: root.row-corner-radius;
+                    animate background { duration: 100ms; }
                     HorizontalLayout {
                         padding-left: root.horizontal-padding;
                         padding-right: root.horizontal-padding;
@@ -242,7 +270,10 @@ export component UiList inherits Rectangle {
                                 width: parent.width - self.x - root.field-horizontal-padding;
                                 height: parent.height;
                                 text: parent.cell.text;
-                                color: parent.cell.has-text-color ? parent.cell.text-color : (column.has-text-color ? column.text-color : (row.selected ? root.selected-text-color : root.row-text-color));
+                                color: parent.cell.has-text-color ? parent.cell.text-color
+                                    : (column.has-text-color ? column.text-color
+                                        : (row.selected ? root.selected-text-color
+                                            : (row-hover.has-hover ? root.hover-text-color : root.row-text-color)));
                                 horizontal-alignment: column.alignment == 2 ? right : (column.alignment == 1 ? center : left);
                                 vertical-alignment: center;
                                 overflow: elide;
@@ -250,13 +281,19 @@ export component UiList inherits Rectangle {
                         }
                     }
                 }
-                TouchArea {
-                    y: row-background.y;
-                    height: row-background.height;
-                    clicked => { root.selected(row.id); }
-                    double-clicked => { root.activated(row.id); }
-                }
             }
+    }
+    status-bar := Rectangle {
+        visible: root.status-visible;
+        x: 0px;
+        y: root.status-at-top ? 0px : parent.height - self.height;
+        width: parent.width;
+        height: root.status-height;
+        clip: true;
+        status-content := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            @children
         }
     }
 }

@@ -372,7 +372,10 @@ fn refresh(
             .collect::<Vec<_>>();
         let count = entries.len();
         ui_list::set_rows(ui, entries);
-        ui.set_status(format!("{count} items · {}", model.location().display()).into());
+        ui.set_list_status_text(format!("{count} items · {}", model.location().display()).into());
+        ui.set_list_status_icon(icons.folder.clone());
+        ui.set_list_has_status_icon(true);
+        ui.set_list_status_icon_size(16.0);
     }
 }
 

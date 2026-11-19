@@ -32,6 +32,11 @@ and cells. A cell may override either color for that particular row/column and
 may carry a caller-owned `slint::Image` plus its requested size; `UiList` only
 lays it out before the cell text. Missing cells render empty.
 
+`UiList` also has an optional status slot. The caller supplies its complete
+Slint content (text, images, buttons, layout, and styling), while `UiList`
+only reserves its height and places it above or below the table. The component
+does not derive a row count or any application status by itself.
+
 ## Build
 
 ```powershell
