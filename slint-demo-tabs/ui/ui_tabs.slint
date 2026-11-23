@@ -1,0 +1,444 @@
+import { UiScrollView } from "ui_scroll_view.slint";
+
+// Document-tab primitives. A group owns only document navigation; its caller
+// owns the document content and reacts to the emitted primitive events.
+export struct TabItem {
+    id: string,
+    title: string,
+    icon: image,
+    has-icon: bool,
+    icon-size: length,
+    text-color: color,
+    has-text-color: bool,
+    closable: bool,
+    enabled: bool,
+}
+
+component TabButton inherits Rectangle {
+    in property <string> tab-id;
+    in property <string> title;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <length> icon-size: 16px;
+    in property <color> item-text-color;
+    in property <bool> has-item-text-color;
+    in property <bool> closable;
+    in property <bool> enabled: true;
+    in property <bool> active;
+    in property <length> horizontal-padding: 12px;
+    in property <length> corner-radius: 6px;
+    // 0/1/2/3 = top/bottom/left/right. The active tab becomes part of the
+    // panel outline, so its colour intentionally matches the panel surface.
+    in property <int> placement: 0;
+    in property <color> panel-background-color;
+    in property <color> panel-border-color;
+    in property <color> strip-background-color;
+    in property <color> active-color;
+    in property <color> hover-color;
+    in property <color> text-color;
+    in property <color> active-text-color;
+    in property <color> disabled-text-color;
+    out property <length> preferred-tab-width: title-text.preferred-width + 2 * root.horizontal-padding
+        + (root.has-icon ? root.icon-size + 6px : 0px) + (root.closable ? 24px : 0px);
+    callback selected(string);
+    callback close-requested(string);
+
+    // Active geometry deliberately overlaps adjacent inactive tab footers.
+    z: root.active ? 1 : 0;
+    border-radius: 0px;
+    border-top-left-radius: root.active ? (root.placement == 0 ? root.corner-radius : 0px) : root.corner-radius;
+    border-top-right-radius: root.active ? (root.placement == 0 ? root.corner-radius : 0px) : root.corner-radius;
+    // Inactive tabs are flush with the common panel edge: never round their
+    // lower corners, including in hover state.
+    border-bottom-left-radius: root.active && root.placement == 1 ? root.corner-radius : 0px;
+    border-bottom-right-radius: root.active && root.placement == 1 ? root.corner-radius : 0px;
+    border-color: root.active ? root.panel-border-color : transparent;
+    // The top placement uses the open Path below. Other placements retain the
+    // rectangular fallback until they get their own matching transition path.
+    border-width: root.active && root.placement != 0 ? 1px : 0px;
+    background: root.active && root.placement != 0 ? root.panel-background-color
+        : (hit.has-hover ? root.hover-color : transparent);
+    hit := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.selected(root.tab-id); }
+    }
+    // The inactive tab has only an open top/side outline. Its bottom is the
+    // shared panel edge behind it, which remains a single continuous line.
+    if (!root.active && root.placement == 0): inactive-outline := Path {
+        private property <float> tab-width: root.width / 1px;
+        private property <float> tab-height: root.height / 1px;
+        private property <float> radius: root.corner-radius / 1px;
+        width: parent.width;
+        height: parent.height;
+        fill: transparent;
+        stroke: root.panel-border-color;
+        stroke-width: 1px;
+        stroke-line-join: round;
+        MoveTo { x: 0; y: inactive-outline.tab-height; }
+        LineTo { x: 0; y: inactive-outline.radius; }
+        QuadraticTo {
+            control-x: 0;
+            control-y: 0;
+            x: inactive-outline.radius;
+            y: 0;
+        }
+        LineTo { x: inactive-outline.tab-width - inactive-outline.radius; y: 0; }
+        QuadraticTo {
+            control-x: inactive-outline.tab-width;
+            control-y: 0;
+            x: inactive-outline.tab-width;
+            y: inactive-outline.radius;
+        }
+        LineTo { x: inactive-outline.tab-width; y: inactive-outline.tab-height; }
+    }
+    // The common panel edge must not cut through an inactive tab's footer.
+    // Leave its ends exposed so the edge still meets the two side outlines.
+    Rectangle {
+        visible: !root.active && root.placement == 0;
+        x: 1px;
+        y: parent.height - 1px;
+        width: max(0px, parent.width - 2px);
+        height: 2px;
+        background: hit.has-hover ? root.hover-color : root.strip-background-color;
+    }
+    // This is an *open* outline, not a rounded rectangle. Its two lower
+    // quadratic curves are the concave transitions requested for a document
+    // tab: the panel edge enters the tab side smoothly at both corners.
+    if (root.active && root.placement == 0): active-shape := Path {
+        // The canvas extends beyond the tab's layout box. Its vertical sides
+        // still land exactly at x=0 and x=width; only the lower transitions
+        // occupy the neighbouring tab footer area.
+        private property <float> tab-width: (root.width + 2 * root.corner-radius) / 1px;
+        private property <float> tab-height: root.height / 1px;
+        private property <float> top-radius: root.corner-radius / 1px;
+        private property <float> join-radius: root.corner-radius / 1px;
+        x: -root.corner-radius;
+        width: parent.width + 2 * root.corner-radius;
+        height: parent.height;
+        fill: root.panel-background-color;
+        stroke: root.panel-border-color;
+        stroke-width: 1px;
+        stroke-line-join: round;
+        MoveTo { x: 0; y: active-shape.tab-height; }
+        QuadraticTo {
+            control-x: active-shape.join-radius;
+            control-y: active-shape.tab-height;
+            x: active-shape.join-radius;
+            y: active-shape.tab-height - active-shape.join-radius;
+        }
+        LineTo { x: active-shape.join-radius; y: active-shape.top-radius; }
+        QuadraticTo {
+            control-x: active-shape.join-radius;
+            control-y: 0;
+            x: active-shape.join-radius + active-shape.top-radius;
+            y: 0;
+        }
+        LineTo { x: active-shape.tab-width - active-shape.join-radius - active-shape.top-radius; y: 0; }
+        QuadraticTo {
+            control-x: active-shape.tab-width - active-shape.join-radius;
+            control-y: 0;
+            x: active-shape.tab-width - active-shape.join-radius;
+            y: active-shape.top-radius;
+        }
+        LineTo { x: active-shape.tab-width - active-shape.join-radius; y: active-shape.tab-height - active-shape.join-radius; }
+        QuadraticTo {
+            control-x: active-shape.tab-width - active-shape.join-radius;
+            control-y: active-shape.tab-height;
+            x: active-shape.tab-width;
+            y: active-shape.tab-height;
+        }
+    }
+    Image {
+        visible: root.has-icon;
+        x: root.horizontal-padding;
+        y: (parent.height - self.height) / 2;
+        width: root.icon-size;
+        height: root.icon-size;
+        source: root.icon;
+        image-fit: contain;
+    }
+    title-text := Text {
+        x: root.horizontal-padding + (root.has-icon ? root.icon-size + 6px : 0px);
+        width: parent.width - self.x - (root.closable ? 26px : root.horizontal-padding);
+        height: parent.height;
+        text: root.title;
+        color: !root.enabled ? root.disabled-text-color : (root.has-item-text-color ? root.item-text-color
+            : (root.active ? root.active-text-color : root.text-color));
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        visible: root.closable;
+        x: parent.width - 24px;
+        y: (parent.height - 20px) / 2;
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        background: close-hit.has-hover ? #455468 : transparent;
+        Text { text: "x"; color: root.text-color; horizontal-alignment: center; vertical-alignment: center; }
+        close-hit := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => { root.close-requested(root.tab-id); }
+        }
+    }
+}
+
+// One Visual-Studio-like document group. `tab-placement` is 0/1/2/3 for
+// top/bottom/left/right. Horizontal placements scroll horizontally; side
+// placements scroll vertically. The content is a slot owned by the caller.
+export component UiTabGroup inherits Rectangle {
+    in property <[TabItem]> tabs;
+    in-out property <string> active-id: "";
+    in property <int> tab-placement: 0;
+    in property <length> tab-height: 34px;
+    in property <length> side-tab-width: 156px;
+    in property <length> tab-min-width: 104px;
+    in property <length> tab-max-width: 220px;
+    in property <length> tab-horizontal-padding: 12px;
+    in property <length> tab-corner-radius: 6px;
+    // Adjacent document tabs share one vertical separator. Paths stroke on
+    // their own half-pixel edge, so one pixel overlap removes the dark seam.
+    in property <length> tab-gap: 0px;
+    in property <length> shared-tab-border-overlap: 1px;
+    // The panel is a bounded viewport. A hosted module declares its own
+    // size; overflow scrolls automatically.
+    in property <bool> content-horizontal-scrollbar-enabled: true;
+    in property <bool> clip-content: true;
+    in property <bool> content-surface-visible: false;
+    in property <color> background-color: transparent;
+    in property <color> strip-background-color: #202733;
+    // Keep the active tab and content surface equal for a joined outline.
+    in property <color> active-tab-color: #1b222d;
+    in property <color> hover-tab-color: #283444;
+    in property <color> tab-text-color: #aeb9c9;
+    in property <color> active-tab-text-color: #f1f5f9;
+    in property <color> disabled-tab-text-color: #687486;
+    in property <color> content-background-color: #1b222d;
+    in property <color> content-border-color: #354154;
+    // Diagnostic geometry overlay. It belongs to the tab primitive so every
+    // hosted module can verify the group boundary versus its content viewport.
+    in property <bool> debug-bounds: false;
+    in property <color> debug-bounds-color: #ff3b30;
+    out property <length> content-x: root.tab-placement == 2 ? root.side-tab-width : 0px;
+    out property <length> content-y: root.tab-placement == 0 ? root.tab-height : 0px;
+    out property <length> content-width: root.width - ((root.tab-placement == 2 || root.tab-placement == 3) ? root.side-tab-width : 0px);
+    out property <length> content-height: root.height - ((root.tab-placement == 0 || root.tab-placement == 1) ? root.tab-height : 0px);
+    // `content-{width,height}` above are viewport dimensions. These report
+    // the hosted module's actual extent and allow the host to persist scroll.
+    out property <length> scroll-content-width <=> content-viewport.content-width;
+    out property <length> scroll-content-height <=> content-viewport.content-height;
+    in-out property <length> content-scroll-x <=> content-viewport.content-x;
+    in-out property <length> content-scroll-y <=> content-viewport.content-y;
+    callback tab-selected(string);
+    callback tab-close-requested(string);
+
+    background: root.background-color;
+    clip: root.clip-content;
+    border-width: root.debug-bounds ? 1px : 0px;
+    border-color: root.debug-bounds-color;
+
+    // The viewport owns only clipping/panning/scrollbars. The child keeps its
+    // own rendering and input contract.
+    content-slot := Rectangle {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        background: root.content-surface-visible ? root.content-background-color : transparent;
+        border-color: root.content-border-color;
+        border-width: root.content-surface-visible ? 1px : 0px;
+        content-viewport := UiScrollView {
+            width: parent.width;
+            height: parent.height;
+            horizontal-scrollbar-enabled: root.content-horizontal-scrollbar-enabled;
+            @children
+        }
+    }
+
+    // This stays above the caller's slot. It marks the exact rectangle made
+    // available to an imported UI module; it does not describe that module's
+    // own bounds, borders, or scrollable content extent.
+    content-debug-outline := Rectangle {
+        visible: root.debug-bounds;
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        background: transparent;
+        border-width: 1px;
+        border-color: root.debug-bounds-color;
+        z: 10;
+    }
+
+    if (root.tab-placement == 0 || root.tab-placement == 1): Rectangle {
+        x: 0px;
+        y: root.tab-placement == 0 ? 0px : parent.height - root.tab-height;
+        width: parent.width;
+        height: root.tab-height;
+        background: root.strip-background-color;
+        Flickable {
+            width: parent.width;
+            height: parent.height;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: root.tab-gap - root.shared-tab-border-overlap;
+                for tab in root.tabs: TabButton {
+                    width: min(root.tab-max-width, max(root.tab-min-width,
+                        self.preferred-tab-width));
+                    height: root.tab-height;
+                    tab-id: tab.id;
+                    title: tab.title;
+                    icon: tab.icon;
+                    has-icon: tab.has-icon;
+                    icon-size: tab.icon-size;
+                    item-text-color: tab.text-color;
+                    has-item-text-color: tab.has-text-color;
+                    closable: tab.closable;
+                    enabled: tab.enabled;
+                    active: tab.id == root.active-id;
+                    horizontal-padding: root.tab-horizontal-padding;
+                    corner-radius: root.tab-corner-radius;
+                    placement: root.tab-placement;
+                    panel-background-color: root.active-tab-color;
+                    panel-border-color: root.content-border-color;
+                    strip-background-color: root.strip-background-color;
+                    active-color: root.active-tab-color;
+                    hover-color: root.hover-tab-color;
+                    text-color: root.tab-text-color;
+                    active-text-color: root.active-tab-text-color;
+                    disabled-text-color: root.disabled-tab-text-color;
+                    selected(id) => { root.tab-selected(id); }
+                    close-requested(id) => { root.tab-close-requested(id); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+    }
+
+    if (root.tab-placement == 2 || root.tab-placement == 3): Rectangle {
+        x: root.tab-placement == 2 ? 0px : parent.width - root.side-tab-width;
+        y: 0px;
+        width: root.side-tab-width;
+        height: parent.height;
+        background: root.strip-background-color;
+        Flickable {
+            width: parent.width;
+            height: parent.height;
+            VerticalLayout {
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: root.tab-gap - root.shared-tab-border-overlap;
+                for tab in root.tabs: TabButton {
+                    width: root.side-tab-width;
+                    height: root.tab-height;
+                    tab-id: tab.id;
+                    title: tab.title;
+                    icon: tab.icon;
+                    has-icon: tab.has-icon;
+                    icon-size: tab.icon-size;
+                    item-text-color: tab.text-color;
+                    has-item-text-color: tab.has-text-color;
+                    closable: tab.closable;
+                    enabled: tab.enabled;
+                    active: tab.id == root.active-id;
+                    horizontal-padding: root.tab-horizontal-padding;
+                    corner-radius: root.tab-corner-radius;
+                    placement: root.tab-placement;
+                    panel-background-color: root.active-tab-color;
+                    panel-border-color: root.content-border-color;
+                    strip-background-color: root.strip-background-color;
+                    active-color: root.active-tab-color;
+                    hover-color: root.hover-tab-color;
+                    text-color: root.tab-text-color;
+                    active-text-color: root.active-tab-text-color;
+                    disabled-text-color: root.disabled-tab-text-color;
+                    selected(id) => { root.tab-selected(id); }
+                    close-requested(id) => { root.tab-close-requested(id); }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+
+}
+
+// Layout primitive for document groups. It has no knowledge of tab models or
+// document contents: callers bind UiTabGroup rectangles to the exported pane
+// geometry and keep the split tree/state in their own host model.
+export component UiTabWorkspace inherits Rectangle {
+    in property <bool> split-enabled: false;
+    // 0 = left/right groups, 1 = top/bottom groups.
+    in property <int> split-direction: 0;
+    in-out property <float> split-ratio: 0.65;
+    in property <length> splitter-thickness: 6px;
+    in property <length> first-pane-min-size: 160px;
+    in property <length> second-pane-min-size: 160px;
+    // Do not clip hosted modules unless the caller explicitly wants a strict
+    // viewport. This preserves popups, shadows and deliberate overflow.
+    in property <bool> clip-content: false;
+    in property <color> splitter-color: #263140;
+    in property <color> splitter-hover-color: #4d6685;
+    out property <length> first-pane-x: 0px;
+    out property <length> first-pane-y: 0px;
+    out property <length> first-pane-width: root.split-enabled && root.split-direction == 0
+        ? max(0px, min(root.width - root.splitter-thickness, root.width * root.split-ratio)) : root.width;
+    out property <length> first-pane-height: root.split-enabled && root.split-direction == 1
+        ? max(0px, min(root.height - root.splitter-thickness, root.height * root.split-ratio)) : root.height;
+    out property <length> second-pane-x: root.split-enabled && root.split-direction == 0
+        ? root.first-pane-width + root.splitter-thickness : 0px;
+    out property <length> second-pane-y: root.split-enabled && root.split-direction == 1
+        ? root.first-pane-height + root.splitter-thickness : 0px;
+    out property <length> second-pane-width: root.split-enabled && root.split-direction == 0
+        ? max(0px, root.width - root.second-pane-x) : root.width;
+    out property <length> second-pane-height: root.split-enabled && root.split-direction == 1
+        ? max(0px, root.height - root.second-pane-y) : root.height;
+    callback split-ratio-changed(float);
+
+    clip: root.clip-content;
+    content-slot := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        @children
+    }
+    splitter := Rectangle {
+        visible: root.split-enabled;
+        x: root.split-direction == 0 ? root.first-pane-width : 0px;
+        y: root.split-direction == 1 ? root.first-pane-height : 0px;
+        width: root.split-direction == 0 ? root.splitter-thickness : parent.width;
+        height: root.split-direction == 1 ? root.splitter-thickness : parent.height;
+        background: splitter-hit.has-hover || splitter-hit.pressed ? root.splitter-hover-color : root.splitter-color;
+        splitter-hit := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: root.split-direction == 0 ? ew-resize : ns-resize;
+            property <length> start-pointer;
+            property <float> start-ratio;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    // `mouse-x/y` is local to the splitter. The splitter moves as
+                    // the ratio changes, so use workspace-relative coordinates.
+                    self.start-pointer = root.split-direction == 0
+                        ? self.absolute-position.x + self.mouse-x - root.absolute-position.x
+                        : self.absolute-position.y + self.mouse-y - root.absolute-position.y;
+                    self.start-ratio = root.split-ratio;
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    let total = root.split-direction == 0 ? root.width : root.height;
+                    let pointer = root.split-direction == 0
+                        ? self.absolute-position.x + self.mouse-x - root.absolute-position.x
+                        : self.absolute-position.y + self.mouse-y - root.absolute-position.y;
+                    let delta = pointer - self.start-pointer;
+                    let minimum = root.first-pane-min-size / max(total - root.splitter-thickness, 1px);
+                    let maximum = 1 - root.second-pane-min-size / max(total - root.splitter-thickness, 1px);
+                    root.split-ratio = max(minimum, min(maximum, self.start-ratio + delta / max(total, 1px)));
+                    root.split-ratio-changed(root.split-ratio);
+                }
+            }
+        }
+    }
+}

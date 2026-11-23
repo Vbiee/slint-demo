@@ -147,6 +147,7 @@ export component UiList inherits Rectangle {
     in property <color> row-text-color: #d9e0ea;
     in property <color> hover-row-color: #273443;
     in property <color> hover-text-color: #f0f4fa;
+    in property <color> focused-row-border-color: #8ab4f8;
     in property <color> selected-row-color: #304c70;
     in property <color> selected-text-color: #f4f7fb;
     in property <length> icon-text-gap: 6px;
@@ -156,13 +157,23 @@ export component UiList inherits Rectangle {
     in property <bool> status-at-top: false;
     in property <length> status-height: 26px;
     in property <length> corner-radius: 0px;
+    // Caller-owned selection state. Modes emitted below: 0 replace, 1 toggle,
+    // 2 extend from the caller's selection anchor.
+    in property <string> focused-id: "";
+    in property <int> keyboard-page-size: 10;
     in-out property <length> content-x: 0px;
+    in-out property <length> content-y: 0px;
     // Resizing is a purely local preview.  The host receives one committed
     // width only after the pointer is released.
     private property <string> resizing-column-id: "";
     private property <length> resizing-column-width: 0px;
     callback selected(string);
+    callback selection-requested(string, int);
+    callback focus-requested(string);
     callback activated(string);
+    callback context-menu-requested(string, length, length);
+    // 1 rename, 2 delete, 3 copy, 4 cut, 5 paste, 6 select-all, 7 clear.
+    callback command-requested(int);
     callback column-resized(string, length);
 
     background: #171a21;
@@ -171,6 +182,64 @@ export component UiList inherits Rectangle {
     border-width: 1px;
     border-radius: root.corner-radius;
     clip: true;
+    forward-focus: focus-scope;
+
+    private property <int> keyboard-index: -1;
+    // A mouse range gesture is translated into the same semantic range
+    // requests as Shift+click.  Selection state itself remains caller-owned.
+    private property <int> drag-last-index: -1;
+    callback request-focus(int);
+    callback extend-drag-selection(int);
+    extend-drag-selection(index) => {
+        let target = max(0, min(root.rows.length - 1, index));
+        if (target != root.drag-last-index && target >= 0) {
+            root.drag-last-index = target;
+            root.keyboard-index = target;
+            root.focus-requested(root.rows[target].id);
+            root.selection-requested(root.rows[target].id, 2);
+        }
+    }
+    request-focus(index) => {
+        root.keyboard-index = max(0, min(root.rows.length - 1, index));
+        if (root.keyboard-index >= 0) {
+            // `content-y` is negative when scrolled down. Keep the complete
+            // focused row inside ListView's current viewport.
+            if (root.keyboard-index * (root.row-height + root.row-gap) < -root.content-y) {
+                root.content-y = -root.keyboard-index * (root.row-height + root.row-gap);
+            } else if ((root.keyboard-index + 1) * (root.row-height + root.row-gap)
+                       > -root.content-y + list.visible-height) {
+                root.content-y = -((root.keyboard-index + 1) * (root.row-height + root.row-gap)
+                    - list.visible-height);
+            }
+            root.focus-requested(root.rows[root.keyboard-index].id);
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) { root.request-focus(root.keyboard-index - 1); }
+            else if (event.text == Key.DownArrow) { root.request-focus(root.keyboard-index + 1); }
+            else if (event.text == Key.Home) { root.request-focus(0); }
+            else if (event.text == Key.End) { root.request-focus(root.rows.length - 1); }
+            else if (event.text == Key.PageUp) { root.request-focus(root.keyboard-index - root.keyboard-page-size); }
+            else if (event.text == Key.PageDown) { root.request-focus(root.keyboard-index + root.keyboard-page-size); }
+            else if (event.text == Key.Return) { if (root.keyboard-index >= 0) { root.activated(root.rows[root.keyboard-index].id); } return accept; }
+            else if (event.text == Key.F2) { root.command-requested(1); return accept; }
+            else if (event.text == Key.Delete) { root.command-requested(2); return accept; }
+            else if (event.modifiers.control && event.text == "a") { root.command-requested(6); return accept; }
+            else if (event.modifiers.control && event.text == "c") { root.command-requested(3); return accept; }
+            else if (event.modifiers.control && event.text == "x") { root.command-requested(4); return accept; }
+            else if (event.modifiers.control && event.text == "v") { root.command-requested(5); return accept; }
+            else if (event.text == Key.Escape) { root.command-requested(7); return accept; }
+            else { return reject; }
+            if (root.keyboard-index >= 0 && !event.modifiers.control) {
+                root.selection-requested(root.rows[root.keyboard-index].id, event.modifiers.shift ? 2 : 0);
+            }
+            accept
+        }
+    }
 
     header := Rectangle {
         x: 0px;
@@ -221,7 +290,8 @@ export component UiList inherits Rectangle {
         height: parent.height - self.y
             - (root.status-visible && !root.status-at-top ? root.status-height : 0px);
         content-x <=> root.content-x;
-            for row in root.rows : Rectangle {
+        content-y <=> root.content-y;
+        for row[index] in root.rows : Rectangle {
                 height: root.row-height + root.row-gap;
                 // This is declared before the visual row so the latter can
                 // consume its hover state while the TouchArea still owns the
@@ -230,7 +300,66 @@ export component UiList inherits Rectangle {
                     y: root.row-gap / 2;
                     width: parent.width;
                     height: root.row-height;
-                    clicked => { root.selected(row.id); }
+                    property <int> selection-mode: 0;
+                    property <bool> selection-applied: false;
+                    property <length> press-window-y: 0px;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            self.selection-mode = event.modifiers.shift ? 2
+                                : (event.modifiers.control ? 1 : 0);
+                            self.selection-applied = false;
+                            root.keyboard-index = index;
+                            focus-scope.focus();
+                            root.focus-requested(row.id);
+                            if (event.button == PointerEventButton.left) {
+                                // Commit the starting item now. A subsequent
+                                // pointer drag can then use it as the host's
+                                // range anchor without keeping local state.
+                                root.drag-last-index = index;
+                                root.selection-requested(row.id, self.selection-mode);
+                                self.selection-applied = true;
+                                self.press-window-y = self.absolute-position.y + self.mouse-y;
+                            } else if (event.button == PointerEventButton.right) {
+                                root.context-menu-requested(row.id,
+                                    self.absolute-position.x + self.mouse-x,
+                                    self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                        if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                            root.drag-last-index = -1;
+                        }
+                    }
+                    moved => {
+                        // A small threshold preserves ordinary click and
+                        // double-click behavior. Ctrl+drag deliberately stays
+                        // a Ctrl-click: additive/toggle range semantics need a
+                        // separate host policy and are not guessed by UiList.
+                        if (self.pressed && self.selection-mode != 1
+                            && abs(self.absolute-position.y + self.mouse-y - self.press-window-y) >= 4px) {
+                            // Keep extending a range while crossing a viewport
+                            // edge. Flickable clamps content-y to its actual
+                            // scroll range; one row per pointer update keeps
+                            // the gesture controllable instead of jumping.
+                            if (self.absolute-position.y + self.mouse-y < list.absolute-position.y) {
+                                root.content-y = min(0px, root.content-y
+                                    + root.row-height + root.row-gap);
+                            } else if (self.absolute-position.y + self.mouse-y
+                                > list.absolute-position.y + list.visible-height) {
+                                root.content-y = root.content-y
+                                    - root.row-height - root.row-gap;
+                            }
+                            root.extend-drag-selection(floor(
+                                (self.absolute-position.y + self.mouse-y
+                                    - list.absolute-position.y - root.content-y)
+                                / (root.row-height + root.row-gap)
+                            ));
+                        }
+                    }
+                    clicked => {
+                        if (!self.selection-applied) {
+                            root.selection-requested(row.id, self.selection-mode);
+                        }
+                    }
                     double-clicked => { root.activated(row.id); }
                 }
                 row-background := Rectangle {
@@ -240,6 +369,9 @@ export component UiList inherits Rectangle {
                     background: row.selected ? root.selected-row-color
                         : (row-hover.has-hover ? root.hover-row-color : transparent);
                     border-radius: root.row-corner-radius;
+                    border-color: root.focused-id == row.id && focus-scope.has-focus
+                        ? root.focused-row-border-color : transparent;
+                    border-width: root.focused-id == row.id && focus-scope.has-focus ? 1px : 0px;
                     animate background { duration: 100ms; }
                     HorizontalLayout {
                         padding-left: root.horizontal-padding;

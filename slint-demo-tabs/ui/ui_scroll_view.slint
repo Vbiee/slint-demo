@@ -1,0 +1,119 @@
+// A presentation-neutral scrolling viewport for modules hosted in a tab.
+// Its child declares its own size; this component only provides the viewport,
+// two-axis panning and theme-owned overlay scrollbars.
+export component UiScrollView inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <bool> horizontal-scrollbar-enabled: true;
+    in property <length> thumb-width: 6px;
+    in property <length> grab-width: 10px;
+    in property <length> min-thumb-length: 24px;
+    in property <length> scrollbar-inset: 3px;
+    in property <color> track-color: #252b3440;
+    in property <color> thumb-color: #6b77884d;
+    in property <color> thumb-hover-color: #8491a4;
+    out property <length> content-height <=> flickable.content-height;
+    in-out property <length> content-y <=> flickable.content-y;
+    out property <length> content-width <=> flickable.content-width;
+    in-out property <length> content-x <=> flickable.content-x;
+    out property <length> visible-height <=> flickable.height;
+    out property <length> visible-width <=> flickable.width;
+    property <length> vertical-maximum: max(0px, flickable.content-height - flickable.height);
+    property <length> horizontal-maximum: max(0px, flickable.content-width - flickable.width);
+    property <bool> vertical-scrollbar-visible: root.vertical-maximum > 0px;
+    property <bool> horizontal-scrollbar-visible: root.horizontal-scrollbar-enabled && root.horizontal-maximum > 0px;
+    property <length> vertical-track-length: max(0px, root.height - 2 * root.scrollbar-inset - (root.horizontal-scrollbar-visible ? root.thumb-width + root.scrollbar-inset : 0px));
+    property <length> horizontal-track-length: max(0px, root.width - 2 * root.scrollbar-inset - (root.vertical-scrollbar-visible ? root.thumb-width + root.scrollbar-inset : 0px));
+    property <length> vertical-thumb-length: min(root.vertical-track-length, max(root.min-thumb-length, root.vertical-track-length * flickable.height / max(flickable.content-height, 1px)));
+    property <length> horizontal-thumb-length: min(root.horizontal-track-length, max(root.min-thumb-length, root.horizontal-track-length * flickable.width / max(flickable.content-width, 1px)));
+
+    clip: true;
+    flickable := Flickable {
+        width: parent.width;
+        height: parent.height;
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+
+    Rectangle {
+        visible: root.vertical-scrollbar-visible;
+        x: parent.width - root.thumb-width - root.scrollbar-inset;
+        y: root.scrollbar-inset;
+        width: root.thumb-width;
+        height: root.vertical-track-length;
+        border-radius: root.thumb-width / 2;
+        background: root.track-color;
+    }
+    vertical-hit := TouchArea {
+        x: parent.width - max(root.grab-width, root.thumb-width) - root.scrollbar-inset;
+        y: root.scrollbar-inset;
+        width: max(root.grab-width, root.thumb-width);
+        height: root.vertical-track-length;
+        enabled: root.enabled && root.vertical-scrollbar-visible;
+        property <length> start-value;
+        property <length> start-mouse;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start-value = -flickable.content-y;
+                self.start-mouse = self.mouse-y;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                flickable.content-y = -max(0px, min(root.vertical-maximum,
+                    self.start-value + (self.mouse-y - self.start-mouse) * root.vertical-maximum
+                        / max(1px, root.vertical-track-length - root.vertical-thumb-length)));
+            }
+        }
+    }
+    Rectangle {
+        visible: root.vertical-scrollbar-visible;
+        x: parent.width - root.thumb-width - root.scrollbar-inset;
+        y: root.scrollbar-inset + (root.vertical-maximum <= 0px ? 0px : (-flickable.content-y / root.vertical-maximum) * (root.vertical-track-length - root.vertical-thumb-length));
+        width: root.thumb-width;
+        height: root.vertical-thumb-length;
+        border-radius: root.thumb-width / 2;
+        background: vertical-hit.has-hover || vertical-hit.pressed ? root.thumb-hover-color : root.thumb-color;
+        animate background { duration: 120ms; }
+    }
+    Rectangle {
+        visible: root.horizontal-scrollbar-visible;
+        x: root.scrollbar-inset;
+        y: parent.height - root.thumb-width - root.scrollbar-inset;
+        width: root.horizontal-track-length;
+        height: root.thumb-width;
+        border-radius: root.thumb-width / 2;
+        background: root.track-color;
+    }
+    horizontal-hit := TouchArea {
+        x: root.scrollbar-inset;
+        y: parent.height - max(root.grab-width, root.thumb-width) - root.scrollbar-inset;
+        width: root.horizontal-track-length;
+        height: max(root.grab-width, root.thumb-width);
+        enabled: root.enabled && root.horizontal-scrollbar-visible;
+        property <length> start-value;
+        property <length> start-mouse;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start-value = -flickable.content-x;
+                self.start-mouse = self.mouse-x;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                flickable.content-x = -max(0px, min(root.horizontal-maximum,
+                    self.start-value + (self.mouse-x - self.start-mouse) * root.horizontal-maximum
+                        / max(1px, root.horizontal-track-length - root.horizontal-thumb-length)));
+            }
+        }
+    }
+    Rectangle {
+        visible: root.horizontal-scrollbar-visible;
+        x: root.scrollbar-inset + (root.horizontal-maximum <= 0px ? 0px : (-flickable.content-x / root.horizontal-maximum) * (root.horizontal-track-length - root.horizontal-thumb-length));
+        y: parent.height - root.thumb-width - root.scrollbar-inset;
+        width: root.horizontal-thumb-length;
+        height: root.thumb-width;
+        border-radius: root.thumb-width / 2;
+        background: horizontal-hit.has-hover || horizontal-hit.pressed ? root.thumb-hover-color : root.thumb-color;
+        animate background { duration: 120ms; }
+    }
+}

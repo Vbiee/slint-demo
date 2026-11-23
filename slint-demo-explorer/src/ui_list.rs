@@ -38,7 +38,11 @@ pub struct Row {
 
 pub enum Event {
     Selected(String),
+    SelectionRequested { id: String, mode: i32 },
+    FocusRequested(String),
     Activated(String),
+    ContextMenuRequested { id: String, x: f32, y: f32 },
+    CommandRequested(i32),
     ColumnResized { id: String, width: f32 },
 }
 
@@ -46,9 +50,13 @@ pub trait Port {
     fn replace_columns(&self, columns: Vec<Column>);
     fn set_column_width(&self, id: &str, width: f32);
     fn replace_rows(&self, rows: Vec<Row>);
-    fn set_selected(&self, id: &str);
+    fn set_selection(&self, ids: &[String]);
     fn on_selected(&self, callback: impl Fn(String) + 'static);
+    fn on_selection_requested(&self, callback: impl Fn(String, i32) + 'static);
+    fn on_focus_requested(&self, callback: impl Fn(String) + 'static);
     fn on_activated(&self, callback: impl Fn(String) + 'static);
+    fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static);
+    fn on_command_requested(&self, callback: impl Fn(i32) + 'static);
     fn on_column_resized(&self, callback: impl Fn(String, f32) + 'static);
 }
 
@@ -65,8 +73,8 @@ pub fn set_rows(port: &impl Port, rows: Vec<Row>) {
     port.replace_rows(rows);
 }
 
-pub fn set_selected(port: &impl Port, id: &str) {
-    port.set_selected(id);
+pub fn set_selection(port: &impl Port, ids: &[String]) {
+    port.set_selection(ids);
 }
 
 pub fn bind(port: &impl Port, on_event: impl Fn(Event) + 'static) {
@@ -75,9 +83,25 @@ pub fn bind(port: &impl Port, on_event: impl Fn(Event) + 'static) {
         let on_event = on_event.clone();
         move |id| on_event(Event::Selected(id))
     });
+    port.on_selection_requested({
+        let on_event = on_event.clone();
+        move |id, mode| on_event(Event::SelectionRequested { id, mode })
+    });
+    port.on_focus_requested({
+        let on_event = on_event.clone();
+        move |id| on_event(Event::FocusRequested(id))
+    });
     port.on_activated({
         let on_event = on_event.clone();
         move |id| on_event(Event::Activated(id))
+    });
+    port.on_context_menu_requested({
+        let on_event = on_event.clone();
+        move |id, x, y| on_event(Event::ContextMenuRequested { id, x, y })
+    });
+    port.on_command_requested({
+        let on_event = on_event.clone();
+        move |command| on_event(Event::CommandRequested(command))
     });
     port.on_column_resized(move |id, width| on_event(Event::ColumnResized { id, width }));
 }

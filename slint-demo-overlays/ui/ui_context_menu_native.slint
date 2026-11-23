@@ -1,0 +1,70 @@
+import { ContextMenuItem, ContextMenuSurface } from "ui_context_menu.slint";
+
+// Native presentation: Window lifecycle/positioning is the only difference
+// from UiContextMenu. Its visual body is the exact same ContextMenuSurface.
+export component DetachedContextMenu inherits Window {
+    title: "Context menu";
+    no-frame: !root.use-native-frame;
+    always-on-top: true;
+    preferred-width: root.menu-width;
+    min-width: root.menu-width;
+    max-width: root.menu-width;
+    // Unlike a Rectangle, a native Window can otherwise choose any height
+    // between `min-height` and `max-height`. Keep its three constraints equal
+    // to the same bounded intrinsic height used by UiContextMenu.
+    preferred-height: root.bounded-intrinsic-height;
+    min-height: root.bounded-intrinsic-height;
+    max-height: root.bounded-intrinsic-height;
+    // A rounded detached menu needs an alpha window surface. The shared
+    // surface below paints the visible body; the remaining corner pixels must
+    // reveal the desktop instead of an opaque square Window background.
+    background: root.corner-radius > 0px ? transparent : root.menu-background;
+
+    in-out property <[ContextMenuItem]> items;
+    in-out property <bool> use-native-frame: true;
+    in-out property <length> corner-radius: 0px;
+    in-out property <length> menu-width: 204px;
+    in-out property <length> menu-max-height: 320px;
+    in-out property <length> menu-padding: 6px;
+    in-out property <length> entry-spacing: 2px;
+    in-out property <length> menu-border-width: 1px;
+    in-out property <color> menu-background: #2a313d;
+    in-out property <color> menu-border-color: #4a576b;
+    in-out property <length> entry-height: 32px;
+    in-out property <length> entry-corner-radius: 4px;
+    in-out property <length> entry-text-left-padding: 10px;
+    in-out property <length> entry-text-right-padding: 10px;
+    in-out property <length> icon-size: 16px;
+    in-out property <length> icon-text-gap: 8px;
+    in-out property <length> shortcut-width: 74px;
+    in-out property <length> separator-height: 1px;
+    in-out property <length> separator-inset: 8px;
+    in-out property <length> entry-border-width: 0px;
+    in-out property <color> entry-background: transparent;
+    in-out property <color> entry-border-color: transparent;
+    in-out property <color> entry-hover-background: #3b4d64;
+    in-out property <color> entry-text-color: #e7edf6;
+    in-out property <color> entry-shortcut-color: #9eabba;
+    in-out property <color> entry-disabled-text-color: #6e7888;
+    in-out property <color> entry-danger-text-color: #ff9a9a;
+    in-out property <color> separator-color: #4a576b;
+    out property <length> intrinsic-height: surface.intrinsic-height;
+    out property <length> bounded-intrinsic-height: min(root.menu-max-height, root.intrinsic-height);
+    callback item-triggered(string);
+
+    surface := ContextMenuSurface {
+        width: parent.width;
+        height: parent.height;
+        items: root.items;
+        menu-padding: root.menu-padding; entry-spacing: root.entry-spacing; menu-border-width: root.menu-border-width;
+        corner-radius: root.corner-radius; menu-background: root.menu-background; menu-border-color: root.menu-border-color;
+        entry-height: root.entry-height; entry-corner-radius: root.entry-corner-radius;
+        entry-text-left-padding: root.entry-text-left-padding; entry-text-right-padding: root.entry-text-right-padding;
+        icon-size: root.icon-size; icon-text-gap: root.icon-text-gap; shortcut-width: root.shortcut-width;
+        separator-height: root.separator-height; separator-inset: root.separator-inset;
+        entry-border-width: root.entry-border-width; entry-background: root.entry-background; entry-border-color: root.entry-border-color;
+        entry-hover-background: root.entry-hover-background; entry-text-color: root.entry-text-color; entry-shortcut-color: root.entry-shortcut-color;
+        entry-disabled-text-color: root.entry-disabled-text-color; entry-danger-text-color: root.entry-danger-text-color; separator-color: root.separator-color;
+        item-triggered(id) => { root.item-triggered(id); }
+    }
+}

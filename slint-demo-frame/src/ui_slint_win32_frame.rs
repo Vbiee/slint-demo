@@ -30,7 +30,7 @@ use windows_sys::Win32::{
             CallWindowProcW, DefWindowProcW, GetClientRect, SetWindowLongPtrW, SetWindowPos,
             GWLP_WNDPROC, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT,
             HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER,
-            SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC,
+            SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC,
         },
     },
 };
@@ -164,6 +164,29 @@ pub fn set_corner_radius(slint_window: &slint::Window, radius: f32) {
                 0,
                 0,
                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER,
+            )
+        };
+    });
+}
+
+/// Set the visible client size after this module's `WM_NCCALCSIZE` hook is
+/// installed. Winit normally adds the Win32 caption to an inner-size request,
+/// but the hook deliberately turns that caption area into client area; using
+/// Winit's normal resize path would therefore make the client too tall by one
+/// caption height.
+pub fn set_custom_frame_client_size(slint_window: &slint::Window, width: u32, height: u32) {
+    let _ = slint_window.with_winit_window(|window| {
+        let Ok(handle) = window.window_handle() else { return; };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else { return; };
+        let _ = unsafe {
+            SetWindowPos(
+                handle.hwnd.get() as HWND,
+                std::ptr::null_mut(),
+                0,
+                0,
+                width.max(1) as i32,
+                height.max(1) as i32,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
             )
         };
     });

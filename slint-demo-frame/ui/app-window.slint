@@ -23,6 +23,9 @@ export component AppWindow inherits Window {
     callback toggle-task(int);
     callback remove-task(int);
     callback set-window-corner-radius(float);
+    callback window-minimize-requested();
+    callback window-maximize-requested();
+    callback window-close-requested();
 
     Rectangle {
         background: #171a21;
@@ -46,15 +49,15 @@ export component AppWindow inherits Window {
                     }
                     Button {
                         text: "-";
-                        clicked => { root.minimized = true; }
+                        clicked => { root.window-minimize-requested(); }
                     }
                     Button {
                         text: "Max";
-                        clicked => { root.maximized = !root.maximized; }
+                        clicked => { root.window-maximize-requested(); }
                     }
                     Button {
                         text: "Close";
-                        clicked => { root.close(); }
+                        clicked => { root.window-close-requested(); }
                     }
                 }
             }

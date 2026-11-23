@@ -1,49 +1,94 @@
-// Reusable client-side title bar. The caller owns the native window actions.
+// Reusable client-side title bar. The caller owns all native window actions.
 export component UiTopBar inherits Rectangle {
     in property <string> title: "Application";
     in property <string> logo: "◆";
+    in property <color> logo-color: #72b7ff;
+    in property <length> logo-size: 16px;
     in property <color> title-color: #dce6f4;
     in property <length> title-size: 14px;
     in property <string> title-font-family: "";
     in property <length> bar-height: 46px;
+    in property <color> bar-background: #202733;
+    in property <length> content-left-padding: 18px;
+    in property <length> content-right-padding: 6px;
+    in property <length> content-spacing: 8px;
+
     in property <color> button-color: #303947;
     in property <color> button-hover-color: #3c4758;
-    in property <color> button-icon-color: #e2e8f0;
+    in property <color> close-button-color: #303947;
     in property <color> close-hover-color: #b53b4a;
+    in property <color> button-icon-color: #e2e8f0;
+    in property <length> button-width: 38px;
+    in property <length> close-button-width: 42px;
+    in property <length> button-height: 34px;
+    in property <length> button-corner-radius: 5px;
+    in property <length> button-icon-size: 18px;
+    in property <string> minimize-icon: "−";
+    in property <string> maximize-icon: "□";
+    in property <string> close-icon: "×";
     in property <string> minimize-tooltip: "";
     in property <string> maximize-tooltip: "";
     in property <string> close-tooltip: "";
+
     // Opt in: a compact popup should not expose actions it does not support.
     in property <bool> show-minimize: false;
     in property <bool> show-maximize: false;
     in property <bool> show-close: false;
-    in property <color> bar-background: #202733;
     callback minimize-requested();
     callback maximize-requested();
     callback close-requested();
 
     height: root.bar-height;
     background: root.bar-background;
+
     HorizontalLayout {
-        padding-left: 18px;
-        padding-right: 6px;
-        spacing: 8px;
-        Text { text: root.logo; color: #72b7ff; font-size: 16px; vertical-alignment: center; }
-        Text { text: root.title; color: #dce6f4; vertical-alignment: center; font-size: 14px; font-weight: 600; horizontal-stretch: 1; }
+        padding-left: root.content-left-padding;
+        padding-right: root.content-right-padding;
+        spacing: root.content-spacing;
+        Text {
+            text: root.logo;
+            color: root.logo-color;
+            font-size: root.logo-size;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.title;
+            color: root.title-color;
+            font-size: root.title-size;
+            font-family: root.title-font-family;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
         Rectangle {
-            visible: root.show-minimize; width: 38px; height: 34px; border-radius: 5px; background: minimize-hit.has-hover ? #3c4758 : transparent;
-            Text { text: "−"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 18px; }
+            visible: root.show-minimize;
+            width: root.button-width;
+            height: root.button-height;
+            border-radius: root.button-corner-radius;
+            background: minimize-hit.has-hover ? root.button-hover-color : root.button-color;
+            Text { text: root.minimize-icon; color: root.button-icon-color; horizontal-alignment: center; vertical-alignment: center; font-size: root.button-icon-size; }
             minimize-hit := TouchArea { clicked => { root.minimize-requested(); } }
+            Tooltip { text: @markdown("\{root.minimize-tooltip}"); }
         }
         Rectangle {
-            visible: root.show-maximize; width: 38px; height: 34px; border-radius: 5px; background: maximize-hit.has-hover ? #3c4758 : transparent;
-            Text { text: "□"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 15px; }
+            visible: root.show-maximize;
+            width: root.button-width;
+            height: root.button-height;
+            border-radius: root.button-corner-radius;
+            background: maximize-hit.has-hover ? root.button-hover-color : root.button-color;
+            Text { text: root.maximize-icon; color: root.button-icon-color; horizontal-alignment: center; vertical-alignment: center; font-size: root.button-icon-size; }
             maximize-hit := TouchArea { clicked => { root.maximize-requested(); } }
+            Tooltip { text: @markdown("\{root.maximize-tooltip}"); }
         }
         Rectangle {
-            visible: root.show-close; width: 42px; height: 34px; border-radius: 5px; background: close-hit.has-hover ? #b53b4a : #303947;
-            Text { text: "×"; color: #e2e8f0; horizontal-alignment: center; vertical-alignment: center; font-size: 19px; }
+            visible: root.show-close;
+            width: root.close-button-width;
+            height: root.button-height;
+            border-radius: root.button-corner-radius;
+            background: close-hit.has-hover ? root.close-hover-color : root.close-button-color;
+            Text { text: root.close-icon; color: root.button-icon-color; horizontal-alignment: center; vertical-alignment: center; font-size: root.button-icon-size; }
             close-hit := TouchArea { clicked => { root.close-requested(); } }
+            Tooltip { text: @markdown("\{root.close-tooltip}"); }
         }
     }
 }

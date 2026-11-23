@@ -2,6 +2,7 @@
 
 slint::include_modules!();
 
+mod app_window_context_menu_port;
 mod overlays;
 #[path = "../../slint-demo-frame/src/ui_slint_win32_frame.rs"]
 mod ui_slint_win32_frame;
@@ -11,10 +12,12 @@ use slint::ComponentHandle;
 
 fn menu_items() -> Vec<context_menu::Item> {
     vec![
-        context_menu::Item { id: "open".into(), label: "Open".into(), enabled: true, danger: false },
-        context_menu::Item { id: "rename".into(), label: "Rename…".into(), enabled: true, danger: false },
-        context_menu::Item { id: "copy".into(), label: "Copy".into(), enabled: false, danger: false },
-        context_menu::Item { id: "delete".into(), label: "Delete".into(), enabled: true, danger: true },
+        context_menu::Item { id: "open".into(), label: "Open".into(), shortcut: "Enter".into(), enabled: true, ..Default::default() },
+        context_menu::Item { id: "rename".into(), label: "Rename…".into(), shortcut: "F2".into(), enabled: true, ..Default::default() },
+        context_menu::Item { id: "separator-edit".into(), separator: true, ..Default::default() },
+        context_menu::Item { id: "preview".into(), label: "Preview pane".into(), checked: true, enabled: true, ..Default::default() },
+        context_menu::Item { id: "copy".into(), label: "Copy".into(), shortcut: "Ctrl+C".into(), enabled: false, ..Default::default() },
+        context_menu::Item { id: "delete".into(), label: "Delete".into(), shortcut: "Del".into(), enabled: true, danger: true, ..Default::default() },
     ]
 }
 
@@ -49,9 +52,8 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     },
     )?);
-    let context_menu = std::rc::Rc::new(context_menu::ContextMenuWindowManager::new(
-        // Default: a square menu with a native DWM shadow. Change this to a
-        // positive radius (for example 7.0) for the frameless rounded style.
+    let context_menu = std::rc::Rc::new(context_menu::ContextMenuManager::new(
+        app_window_context_menu_port::AppWindowContextMenuPort::new(&ui),
         context_menu::ContextMenuOptions::default(),
         {
         let ui_weak = ui.as_weak();
@@ -69,7 +71,6 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     },
     )?);
-    context_menu.bind_to_caller(&ui, menu_items);
 
     ui.on_request_modal({
         let ui_weak = ui.as_weak();
@@ -91,6 +92,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 .expect("failed to show detached popup");
         }
     });
+    ui.on_request_in_app_context_menu({
+        let context_menu = context_menu.clone();
+        let ui_weak = ui.as_weak();
+        move |x, y| {
+            let Some(ui) = ui_weak.upgrade() else { return; };
+            let _ = context_menu.show(ui.get_context_menu_native(), x, y, menu_items());
+        }
+    });
     ui.on_caller_blocked({
         let popup = detached_popup.clone();
         let ui_weak = ui.as_weak();
@@ -106,11 +115,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let context_menu = context_menu.clone();
         let ui_weak = ui.as_weak();
         move |x, y| {
-            if let Some(ui) = ui_weak.upgrade() {
-                if context_menu.show(&ui, x, y, menu_items()).is_err() {
-                    ui.set_status("Failed to show the detached context menu.".into());
-                }
-            }
+            let Some(ui) = ui_weak.upgrade() else { return; };
+            let _ = context_menu.show(ui.get_context_menu_native(), x, y, menu_items());
         }
     });
 

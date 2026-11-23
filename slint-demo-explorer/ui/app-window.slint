@@ -13,7 +13,9 @@ export component AppWindow inherits Window {
     in-out property <[TreeNode]> tree-nodes;
     in-out property <[ListColumn]> list-columns;
     in-out property <[ListRow]> list-rows;
+    in-out property <string> list-focused-id;
     in-out property <string> list-status-text;
+    in-out property <string> list-operation-status;
     in-out property <image> list-status-icon;
     in-out property <bool> list-has-status-icon: false;
     in-out property <length> list-status-icon-size: 16px;
@@ -24,7 +26,11 @@ export component AppWindow inherits Window {
     callback tree-expansion-toggled(string);
     callback tree-activated(string);
     callback list-selected(string);
+    callback list-selection-requested(string, int);
+    callback list-focus-requested(string);
     callback list-activated(string);
+    callback list-context-menu-requested(string, length, length);
+    callback list-command-requested(int);
     callback list-column-resized(string, length);
 
     Rectangle {
@@ -78,11 +84,16 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         columns: root.list-columns;
                         rows: root.list-rows;
+                        focused-id: root.list-focused-id;
                         status-visible: true;
                         status-at-top: true;
                         corner-radius: 10px;
                         selected(id) => { root.list-selected(id); }
+                        selection-requested(id, mode) => { root.list-selection-requested(id, mode); }
+                        focus-requested(id) => { root.list-focus-requested(id); }
                         activated(id) => { root.list-activated(id); }
+                        context-menu-requested(id, x, y) => { root.list-context-menu-requested(id, x, y); }
+                        command-requested(command) => { root.list-command-requested(command); }
                         column-resized(id, width) => { root.list-column-resized(id, width); }
                         // Default UiList children are its status slot. This
                         // host controls all of its content and arrangement.
@@ -96,11 +107,15 @@ export component AppWindow inherits Window {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 6px;
-                                if root.list-has-status-icon : Image {
+                                if root.list-has-status-icon : Rectangle {
                                     width: root.list-status-icon-size;
-                                    height: root.list-status-icon-size;
-                                    source: root.list-status-icon;
-                                    image-fit: contain;
+                                    Image {
+                                        width: parent.width;
+                                        height: root.list-status-icon-size;
+                                        y: (parent.height - self.height) / 2;
+                                        source: root.list-status-icon;
+                                        image-fit: contain;
+                                    }
                                 }
                                 Text {
                                     text: root.list-status-text;
@@ -108,6 +123,15 @@ export component AppWindow inherits Window {
                                     font-size: 12px;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    width: 250px;
+                                    text: root.list-operation-status;
+                                    color: #d9e0ea;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
                                     overflow: elide;
                                 }
                             }

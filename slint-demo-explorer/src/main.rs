@@ -122,14 +122,14 @@ impl ui_list::Port for AppWindow {
         self.set_list_rows(ModelRc::new(VecModel::from(rows)));
     }
 
-    fn set_selected(&self, id: &str) {
+    fn set_selection(&self, ids: &[String]) {
         // With UiList's virtual ListView, only visible delegates redraw.
         let rows = self.get_list_rows();
         for row in 0..rows.row_count() {
             let Some(mut item) = rows.row_data(row) else {
                 continue;
             };
-            let selected = item.id.as_str() == id;
+            let selected = ids.iter().any(|id| item.id.as_str() == id);
             if item.selected != selected {
                 item.selected = selected;
                 rows.set_row_data(row, item);
@@ -141,8 +141,24 @@ impl ui_list::Port for AppWindow {
         self.on_list_selected(move |id| callback(id.to_string()));
     }
 
+    fn on_selection_requested(&self, callback: impl Fn(String, i32) + 'static) {
+        self.on_list_selection_requested(move |id, mode| callback(id.to_string(), mode));
+    }
+
+    fn on_focus_requested(&self, callback: impl Fn(String) + 'static) {
+        self.on_list_focus_requested(move |id| callback(id.to_string()));
+    }
+
     fn on_activated(&self, callback: impl Fn(String) + 'static) {
         self.on_list_activated(move |id| callback(id.to_string()));
+    }
+
+    fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static) {
+        self.on_list_context_menu_requested(move |id, x, y| callback(id.to_string(), x, y));
+    }
+
+    fn on_command_requested(&self, callback: impl Fn(i32) + 'static) {
+        self.on_list_command_requested(callback);
     }
 
     fn on_column_resized(&self, callback: impl Fn(String, f32) + 'static) {
@@ -164,6 +180,36 @@ struct TreeIcons {
     drive: Image,
     folder: Image,
     file: Image,
+}
+
+#[derive(Default)]
+struct SelectionState {
+    ids: HashSet<String>,
+    focused_id: String,
+    anchor_id: String,
+}
+
+impl SelectionState {
+    fn clear(&mut self) {
+        self.ids.clear();
+        self.focused_id.clear();
+        self.anchor_id.clear();
+    }
+
+    fn replace(&mut self, id: String) {
+        self.ids.clear();
+        self.ids.insert(id.clone());
+        self.focused_id = id.clone();
+        self.anchor_id = id;
+    }
+}
+
+fn selection_status(selection: &SelectionState) -> String {
+    match selection.ids.len() {
+        0 => "No items selected".into(),
+        1 => "1 item selected".into(),
+        count => format!("{count} items selected"),
+    }
 }
 
 impl TreeIcons {
@@ -340,13 +386,15 @@ fn explorer_columns() -> Vec<ui_list::Column> {
 fn refresh(
     ui: &AppWindow,
     model: &ExplorerModel,
-    selected: &str,
+    selection: &SelectionState,
     expanded: &HashSet<String>,
     folder_cache: &mut HashMap<PathBuf, Vec<PathBuf>>,
     icons: &TreeIcons,
     reload_list: bool,
 ) {
     ui.set_location(model.location().display().to_string().into());
+    ui.set_list_focused_id(selection.focused_id.clone().into());
+    ui.set_list_operation_status(selection_status(selection).into());
     ui_tree::set_nodes(ui, build_tree_nodes(model, expanded, folder_cache, icons));
 
     if reload_list {
@@ -354,7 +402,7 @@ fn refresh(
             .entries()
             .into_iter()
             .map(|entry| ui_list::Row {
-                selected: entry.path.to_string_lossy() == selected,
+                selected: selection.ids.contains(entry.path.to_string_lossy().as_ref()),
                 id: entry.path.to_string_lossy().into_owned().into(),
                 cells: vec![
                     ui_list::Cell {
@@ -385,7 +433,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui = AppWindow::new()?;
     let model = Rc::new(RefCell::new(ExplorerModel::new()));
-    let selected = Rc::new(RefCell::new(String::new()));
+    let selection = Rc::new(RefCell::new(SelectionState::default()));
     let expanded = Rc::new(RefCell::new(HashSet::new()));
     let columns = Rc::new(RefCell::new(explorer_columns()));
     let folder_cache = Rc::new(RefCell::new(HashMap::new()));
@@ -395,7 +443,7 @@ fn main() -> Result<(), slint::PlatformError> {
     refresh(
         &ui,
         &model.borrow(),
-        &selected.borrow(),
+        &selection.borrow(),
         &expanded.borrow(),
         &mut folder_cache.borrow_mut(),
         &icons,
@@ -405,19 +453,19 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_navigate_up({
         let ui_weak = ui.as_weak();
         let model = model.clone();
-        let selected = selected.clone();
+        let selection = selection.clone();
         let expanded = expanded.clone();
         let folder_cache = folder_cache.clone();
         let icons = icons.clone();
         move || {
             model.borrow_mut().navigate_up();
-            selected.borrow_mut().clear();
+            selection.borrow_mut().clear();
             expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
             if let Some(ui) = ui_weak.upgrade() {
                 refresh(
                     &ui,
                     &model.borrow(),
-                    &selected.borrow(),
+                    &selection.borrow(),
                     &expanded.borrow(),
                     &mut folder_cache.borrow_mut(),
                     &icons,
@@ -429,20 +477,20 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_navigate_to({
         let ui_weak = ui.as_weak();
         let model = model.clone();
-        let selected = selected.clone();
+        let selection = selection.clone();
         let expanded = expanded.clone();
         let folder_cache = folder_cache.clone();
         let icons = icons.clone();
         move |path: SharedString| {
             if model.borrow_mut().navigate(PathBuf::from(path.to_string())) {
-                selected.borrow_mut().clear();
+                selection.borrow_mut().clear();
                 expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
             }
             if let Some(ui) = ui_weak.upgrade() {
                 refresh(
                     &ui,
                     &model.borrow(),
-                    &selected.borrow(),
+                    &selection.borrow(),
                     &expanded.borrow(),
                     &mut folder_cache.borrow_mut(),
                     &icons,
@@ -454,7 +502,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui_tree::bind(&ui, {
         let ui_weak = ui.as_weak();
         let model = model.clone();
-        let selected = selected.clone();
+        let selection = selection.clone();
         let expanded = expanded.clone();
         let folder_cache = folder_cache.clone();
         let icons = icons.clone();
@@ -463,7 +511,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui_tree::Event::Selected(id) | ui_tree::Event::Activated(id) => {
                     let navigated = model.borrow_mut().navigate(PathBuf::from(id));
                     if navigated {
-                        selected.borrow_mut().clear();
+                        selection.borrow_mut().clear();
                         expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
                     }
                     navigated
@@ -480,7 +528,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 refresh(
                     &ui,
                     &model.borrow(),
-                    &selected.borrow(),
+                    &selection.borrow(),
                     &expanded.borrow(),
                     &mut folder_cache.borrow_mut(),
                     &icons,
@@ -492,27 +540,88 @@ fn main() -> Result<(), slint::PlatformError> {
     ui_list::bind(&ui, {
         let ui_weak = ui.as_weak();
         let model = model.clone();
-        let selected = selected.clone();
+        let selection = selection.clone();
         let expanded = expanded.clone();
         let folder_cache = folder_cache.clone();
         let icons = icons.clone();
         let columns = columns.clone();
         move |event| match event {
             ui_list::Event::Selected(id) => {
-                *selected.borrow_mut() = id;
+                selection.borrow_mut().replace(id);
                 if let Some(ui) = ui_weak.upgrade() {
-                    ui_list::set_selected(&ui, &selected.borrow());
+                    let ids = selection.borrow().ids.iter().cloned().collect::<Vec<_>>();
+                    ui_list::set_selection(&ui, &ids);
+                    ui.set_list_operation_status(selection_status(&selection.borrow()).into());
+                }
+            }
+            ui_list::Event::SelectionRequested { id, mode } => {
+                let mut selection = selection.borrow_mut();
+                if mode == 1 {
+                    if !selection.ids.insert(id.clone()) { selection.ids.remove(&id); }
+                    selection.focused_id = id;
+                } else if mode == 2 && !selection.anchor_id.is_empty() {
+                    let entries = model.borrow().entries();
+                    let anchor = entries.iter().position(|entry| entry.path.to_string_lossy() == selection.anchor_id);
+                    let target = entries.iter().position(|entry| entry.path.to_string_lossy() == id);
+                    if let (Some(anchor), Some(target)) = (anchor, target) {
+                        selection.ids.clear();
+                        for entry in &entries[anchor.min(target)..=anchor.max(target)] {
+                            selection.ids.insert(entry.path.to_string_lossy().into_owned());
+                        }
+                    }
+                    selection.focused_id = id;
+                } else { selection.replace(id); }
+                let ids = selection.ids.iter().cloned().collect::<Vec<_>>();
+                let operation_status = selection_status(&selection);
+                drop(selection);
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui_list::set_selection(&ui, &ids);
+                    ui.set_list_operation_status(operation_status.into());
+                }
+            }
+            ui_list::Event::FocusRequested(id) => {
+                selection.borrow_mut().focused_id = id.clone();
+                if let Some(ui) = ui_weak.upgrade() { ui.set_list_focused_id(id.into()); }
+            }
+            ui_list::Event::ContextMenuRequested { id, x, y } => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_list_operation_status(format!("Context menu: {id} at {x:.0}, {y:.0}").into());
+                }
+            }
+            ui_list::Event::CommandRequested(command) => {
+                let status = match command {
+                    6 => {
+                        let ids = model.borrow().entries().into_iter().map(|entry| entry.path.to_string_lossy().into_owned()).collect::<HashSet<_>>();
+                        let mut selection = selection.borrow_mut();
+                        selection.ids = ids;
+                        selection.focused_id = selection.ids.iter().next().cloned().unwrap_or_default();
+                        selection.anchor_id = selection.focused_id.clone();
+                        "Selected all items".to_owned()
+                    }
+                    7 => { selection.borrow_mut().clear(); "Cleared selection".to_owned() }
+                    1 => "Rename requested (editor not implemented)".to_owned(),
+                    2 => "Delete requested (confirmation required)".to_owned(),
+                    3 => "Copy requested".to_owned(),
+                    4 => "Cut requested".to_owned(),
+                    5 => "Paste requested".to_owned(),
+                    _ => "Unknown list command".to_owned(),
+                };
+                if let Some(ui) = ui_weak.upgrade() {
+                    let ids = selection.borrow().ids.iter().cloned().collect::<Vec<_>>();
+                    ui_list::set_selection(&ui, &ids);
+                    ui.set_list_focused_id(selection.borrow().focused_id.clone().into());
+                    ui.set_list_operation_status(status.into());
                 }
             }
             ui_list::Event::Activated(id) => {
                 if model.borrow_mut().navigate(PathBuf::from(id)) {
-                    selected.borrow_mut().clear();
+                    selection.borrow_mut().clear();
                     expand_location_ancestors(&model.borrow(), &mut expanded.borrow_mut());
                     if let Some(ui) = ui_weak.upgrade() {
                         refresh(
                             &ui,
                             &model.borrow(),
-                            &selected.borrow(),
+                            &selection.borrow(),
                             &expanded.borrow(),
                             &mut folder_cache.borrow_mut(),
                             &icons,

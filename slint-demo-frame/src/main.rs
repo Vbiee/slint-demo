@@ -3,6 +3,8 @@
 mod core;
 #[cfg(target_os = "windows")]
 mod ui_slint_win32_frame;
+#[cfg(target_os = "windows")]
+mod ui_slint_win32_control;
 
 use crate::core::TaskStore;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -32,9 +34,11 @@ fn refresh(ui: &AppWindow, store: &TaskStore) {
 
 fn main() -> Result<(), slint::PlatformError> {
     #[cfg(target_os = "windows")]
-    ui_slint_win32_frame::select_alpha_winit_backend()?;
+    ui_slint_win32_control::UiSlintWin32Control::select_backend()?;
 
     let ui = AppWindow::new()?;
+    #[cfg(target_os = "windows")]
+    let mut window_control = ui_slint_win32_control::UiSlintWin32Control::new(Default::default());
     let store = Rc::new(RefCell::new(TaskStore::demo()));
     refresh(&ui, &store.borrow());
 
@@ -71,21 +75,55 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     ui.on_set_window_corner_radius({
         let ui_weak = ui.as_weak();
+        #[cfg(target_os = "windows")]
+        let mut window_control = window_control;
         move |radius| {
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_corner_radius(radius);
                 #[cfg(target_os = "windows")]
-                ui_slint_win32_frame::set_corner_radius(&ui.window(), radius);
+                window_control.set_corner_radius(&ui.window(), radius);
             }
         }
     });
 
     #[cfg(target_os = "windows")]
-    ui_slint_win32_frame::install(&ui.window(), ui_slint_win32_frame::FrameConfig::default());
+    ui.on_window_minimize_requested({
+        let ui_weak = ui.as_weak();
+        let window_control = window_control;
+        move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                window_control.minimize(&ui.window());
+            }
+        }
+    });
+    #[cfg(target_os = "windows")]
+    ui.on_window_maximize_requested({
+        let ui_weak = ui.as_weak();
+        let window_control = window_control;
+        move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                window_control.toggle_maximized(&ui.window());
+            }
+        }
+    });
+    ui.on_window_close_requested({
+        let ui_weak = ui.as_weak();
+        move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let _ = ui.hide();
+            }
+        }
+    });
+
+    #[cfg(target_os = "windows")]
+    window_control.install(&ui.window());
 
     // show() creates the native Winit window. The Windows event handler above
     // then extends the client area through the title bar while retaining DWM.
     ui.show()?;
+
+    #[cfg(target_os = "windows")]
+    window_control.after_show(&ui.window());
 
     ui.run()
 }

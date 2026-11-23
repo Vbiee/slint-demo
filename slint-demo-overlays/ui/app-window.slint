@@ -1,20 +1,21 @@
 import { UiModal } from "ui_modal.slint";
+import { UiContextMenu, ContextMenuItem } from "ui_context_menu.slint";
 export { DetachedPopup } from "detached_popup.slint";
-export { DetachedContextMenu } from "detached_context_menu.slint";
+export { DetachedContextMenu } from "ui_context_menu_native.slint";
 export { ContextMenuItem } from "ui_context_menu.slint";
 
 export component AppWindow inherits Window {
     title: "Slint Overlay Components";
     preferred-width: 880px;
     preferred-height: 560px;
-    min-width: 620px;
-    min-height: 400px;
+    min-width: 0px;
+    min-height: 0px;
     background: #171b22;
 
     in-out property <bool> modal-open: false;
     in-out property <string> modal-title: "Delete draft?";
     in-out property <string> modal-message: "This demonstrates a reusable modal. The Rust caller receives a semantic event, not a button ID.";
-    in-out property <string> status: "Right-click the canvas, or open the modal.";
+    in-out property <string> status: "Right-click the canvas to open the reusable in-app menu.";
     in-out property <string> topbar-title: "Native popup window";
     in-out property <bool> topbar-minimize: false;
     in-out property <bool> topbar-maximize: false;
@@ -23,10 +24,20 @@ export component AppWindow inherits Window {
     in-out property <int> topbar-font-size: 14;
     in-out property <bool> lock-caller: false;
     in-out property <bool> native-popup-locking: false;
+    in-out property <bool> context-menu-open: false;
+    in-out property <length> context-menu-anchor-x: 0px;
+    in-out property <length> context-menu-anchor-y: 0px;
+    in-out property <[ContextMenuItem]> context-menu-items;
+    // The host chooses the presentation; both use the same Rust menu API.
+    in-out property <bool> context-menu-native: false;
 
     callback request-modal();
     callback request-detached-popup();
+    callback request-in-app-context-menu(length, length);
     callback request-context-menu(length, length);
+    callback context-menu-item-triggered(string);
+    callback context-menu-dismissed();
+    callback context-menu-replacement-requested(length, length);
     // Fired when the native popup has locked this caller and intercepted input.
     callback caller-blocked();
     callback modal-confirmed();
@@ -47,11 +58,11 @@ export component AppWindow inherits Window {
                 border-color: #354154;
                 border-width: 1px;
                 border-radius: 8px;
-                Text { text: "Right-click anywhere in this canvas"; color: #8f9caf; horizontal-alignment: center; vertical-alignment: center; }
+                Text { text: "Right-click anywhere in this canvas to open the selected context-menu presentation"; color: #8f9caf; horizontal-alignment: center; vertical-alignment: center; }
                 TouchArea {
                     pointer-event(event) => {
                         if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                            root.request-context-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            root.request-in-app-context-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                         }
                     }
                 }
@@ -79,8 +90,27 @@ export component AppWindow inherits Window {
                     height: 38px;
                     background: #374151;
                     border-radius: 5px;
-                    Text { text: "Open context menu"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    Text { text: "Open selected menu"; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
                     TouchArea { clicked => { root.request-context-menu(264px, 244px); } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { width: 150px; text: "Context-menu presentation:"; color: #aeb9c9; vertical-alignment: center; }
+                for native in [false, true] : Rectangle {
+                    width: 92px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: root.context-menu-native == native ? #3478c6 : #374151;
+                    Text {
+                        text: native ? "Native" : "In-app";
+                        color: #ffffff;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.context-menu-native = native; } }
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
@@ -109,6 +139,20 @@ export component AppWindow inherits Window {
             Text { text: root.status; color: #91a0b5; font-size: 12px; }
             Rectangle { vertical-stretch: 1; }
         }
+    }
+
+    // The generic menu is an overlay in the caller's coordinate system. It
+    // knows neither the canvas nor the meaning of any command ID.
+    UiContextMenu {
+        width: parent.width;
+        height: parent.height;
+        open: root.context-menu-open;
+        anchor-x: root.context-menu-anchor-x;
+        anchor-y: root.context-menu-anchor-y;
+        items: root.context-menu-items;
+        item-triggered(id) => { root.context-menu-item-triggered(id); }
+        dismissed => { root.context-menu-dismissed(); }
+        replacement-requested(x, y) => { root.context-menu-replacement-requested(x, y); }
     }
 
     UiModal {

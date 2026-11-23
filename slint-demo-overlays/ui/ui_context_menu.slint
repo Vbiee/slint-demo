@@ -1,57 +1,202 @@
+// Data-only contract. The caller assigns meaning to `id`; menu visuals only
+// render choices and report primitive menu events.
 export struct ContextMenuItem {
-    id: string,
-    label: string,
-    enabled: bool,
-    danger: bool,
+    id: string, label: string, shortcut: string, icon: image, has-icon: bool,
+    enabled: bool, checked: bool, danger: bool, separator: bool,
+    // Optional per-entry presentation overrides. When either `has-*` flag
+    // is false, the shared menu theme supplies that value instead.
+    text-color: color, has-text-color: bool,
+    hover-background-color: color, has-hover-background-color: bool,
 }
 
-// Generic context menu. Its owner supplies menu data and absolute anchor.
+// The one shared visual surface used by both in-app and native presentations.
+// It owns every detail that affects intrinsic height, ensuring the two hosts
+// cannot drift apart in row geometry, scrolling, or colors.
+export component ContextMenuSurface inherits Rectangle {
+    in property <[ContextMenuItem]> items;
+    in property <length> menu-padding: 6px;
+    in property <length> entry-spacing: 2px;
+    in property <length> menu-border-width: 1px;
+    in property <length> corner-radius: 0px;
+    in property <color> menu-background: #2a313d;
+    in property <color> menu-border-color: #4a576b;
+    in property <length> entry-height: 32px;
+    in property <length> entry-corner-radius: 4px;
+    in property <length> entry-text-left-padding: 10px;
+    in property <length> entry-text-right-padding: 10px;
+    in property <length> icon-size: 16px;
+    in property <length> icon-text-gap: 8px;
+    in property <length> shortcut-width: 74px;
+    in property <length> separator-height: 1px;
+    in property <length> separator-inset: 8px;
+    in property <length> entry-border-width: 0px;
+    in property <color> entry-background: transparent;
+    in property <color> entry-border-color: transparent;
+    in property <color> entry-hover-background: #3b4d64;
+    in property <color> entry-text-color: #e7edf6;
+    in property <color> entry-shortcut-color: #9eabba;
+    in property <color> entry-disabled-text-color: #6e7888;
+    in property <color> entry-danger-text-color: #ff9a9a;
+    in property <color> separator-color: #4a576b;
+    out property <length> intrinsic-height: items-layout.preferred-height;
+    callback item-triggered(string);
+
+    background: root.menu-background;
+    border-color: root.menu-border-color;
+    border-width: root.menu-border-width;
+    border-radius: root.corner-radius;
+    clip: true;
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        mouse-drag-pan-enabled: false;
+        items-layout := VerticalLayout {
+            padding: root.menu-padding;
+            spacing: root.entry-spacing;
+            for item in root.items : Rectangle {
+                height: item.separator ? root.separator-height : root.entry-height;
+                border-radius: root.entry-corner-radius;
+                background: !item.separator && row-hit.has-hover && item.enabled
+                    ? (item.has-hover-background-color ? item.hover-background-color
+                        : root.entry-hover-background)
+                    : root.entry-background;
+                border-width: root.entry-border-width;
+                border-color: root.entry-border-color;
+                Rectangle {
+                    visible: item.separator;
+                    x: root.separator-inset;
+                    width: max(0px, parent.width - 2 * root.separator-inset);
+                    height: root.separator-height;
+                    y: (parent.height - self.height) / 2;
+                    background: root.separator-color;
+                }
+                Text {
+                    visible: !item.separator && item.checked;
+                    x: root.entry-text-left-padding;
+                    width: root.icon-size;
+                    height: parent.height;
+                    text: "✓";
+                    color: item.has-text-color ? item.text-color
+                        : (item.enabled ? root.entry-text-color : root.entry-disabled-text-color);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                Image {
+                    visible: !item.separator && item.has-icon;
+                    x: root.entry-text-left-padding + (item.checked ? root.icon-size + root.icon-text-gap : 0px);
+                    y: (parent.height - self.height) / 2;
+                    width: root.icon-size;
+                    height: root.icon-size;
+                    source: item.icon;
+                    image-fit: contain;
+                }
+                Text {
+                    visible: !item.separator;
+                    x: root.entry-text-left-padding
+                        + (item.checked ? root.icon-size + root.icon-text-gap : 0px)
+                        + (item.has-icon ? root.icon-size + root.icon-text-gap : 0px);
+                    width: max(0px, parent.width - self.x - root.entry-text-right-padding
+                        - (item.shortcut == "" ? 0px : root.shortcut-width));
+                    height: parent.height;
+                    text: item.label;
+                    color: item.has-text-color ? item.text-color
+                        : (!item.enabled ? root.entry-disabled-text-color
+                            : (item.danger ? root.entry-danger-text-color : root.entry-text-color));
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Text {
+                    visible: !item.separator && item.shortcut != "";
+                    x: parent.width - root.entry-text-right-padding - root.shortcut-width;
+                    width: root.shortcut-width;
+                    height: parent.height;
+                    text: item.shortcut;
+                    // A per-entry text color applies to every textual part of
+                    // that row, including its shortcut and check glyph.
+                    color: item.has-text-color ? item.text-color
+                        : (item.enabled ? root.entry-shortcut-color : root.entry-disabled-text-color);
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                row-hit := TouchArea {
+                    enabled: !item.separator && item.enabled;
+                    clicked => { root.item-triggered(item.id); }
+                }
+            }
+        }
+    }
+}
+
+// In-app presentation: only owns the full-parent dismiss area and clamps the
+// shared surface to the caller's bounds.
 export component UiContextMenu inherits Rectangle {
     in property <bool> open: false;
     in property <length> anchor-x: 0px;
     in property <length> anchor-y: 0px;
     in property <[ContextMenuItem]> items;
+    in property <length> menu-width: 204px;
+    in property <length> menu-max-height: 320px;
+    in property <length> viewport-margin: 8px;
+    in property <length> menu-padding: 6px;
+    in property <length> entry-spacing: 2px;
+    in property <length> menu-border-width: 1px;
+    in property <length> corner-radius: 0px;
+    in property <color> menu-background: #2a313d;
+    in property <color> menu-border-color: #4a576b;
+    in property <length> entry-height: 32px;
+    in property <length> entry-corner-radius: 4px;
+    in property <length> entry-text-left-padding: 10px;
+    in property <length> entry-text-right-padding: 10px;
+    in property <length> icon-size: 16px;
+    in property <length> icon-text-gap: 8px;
+    in property <length> shortcut-width: 74px;
+    in property <length> separator-height: 1px;
+    in property <length> separator-inset: 8px;
+    in property <length> entry-border-width: 0px;
+    in property <color> entry-background: transparent;
+    in property <color> entry-border-color: transparent;
+    in property <color> entry-hover-background: #3b4d64;
+    in property <color> entry-text-color: #e7edf6;
+    in property <color> entry-shortcut-color: #9eabba;
+    in property <color> entry-disabled-text-color: #6e7888;
+    in property <color> entry-danger-text-color: #ff9a9a;
+    in property <color> separator-color: #4a576b;
     callback item-triggered(string);
     callback dismissed();
-
+    // Right-clicking outside an open in-app menu replaces it at this anchor;
+    // it must not be treated as a dismiss-only click.
+    callback replacement-requested(length, length);
     visible: root.open;
 
-    // Must be behind the menu so individual rows still receive clicks.
     dismiss-area := TouchArea {
         width: parent.width;
         height: parent.height;
-        clicked => { root.dismissed(); }
-    }
-
-    menu := Rectangle {
-        width: 204px;
-        height: min(parent.height - 16px, 12px + root.items.length * 34px);
-        x: min(max(8px, root.anchor-x), parent.width - self.width - 8px);
-        y: min(max(8px, root.anchor-y), parent.height - self.height - 8px);
-        background: #2a313d;
-        border-color: #4a576b;
-        border-width: 1px;
-        border-radius: 7px;
-        clip: true;
-
-        VerticalLayout {
-            padding: 6px;
-            spacing: 2px;
-            for item in root.items : Rectangle {
-                height: 32px;
-                border-radius: 4px;
-                background: row-hit.has-hover && item.enabled ? #3b4d64 : transparent;
-                Text {
-                    x: 10px;
-                    text: item.label;
-                    color: !item.enabled ? #6e7888 : (item.danger ? #ff9a9a : #e7edf6);
-                    vertical-alignment: center;
-                }
-                row-hit := TouchArea {
-                    enabled: item.enabled;
-                    clicked => { root.item-triggered(item.id); }
-                }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                root.replacement-requested(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.dismissed();
             }
         }
+    }
+    menu := ContextMenuSurface {
+        width: min(root.menu-width, max(0px, parent.width - 2 * root.viewport-margin));
+        height: min(max(0px, parent.height - 2 * root.viewport-margin), min(root.menu-max-height, self.intrinsic-height));
+        x: min(max(root.viewport-margin, root.anchor-x), parent.width - self.width - root.viewport-margin);
+        y: min(max(root.viewport-margin, root.anchor-y), parent.height - self.height - root.viewport-margin);
+        items: root.items;
+        menu-padding: root.menu-padding; entry-spacing: root.entry-spacing; menu-border-width: root.menu-border-width;
+        corner-radius: root.corner-radius; menu-background: root.menu-background; menu-border-color: root.menu-border-color;
+        entry-height: root.entry-height; entry-corner-radius: root.entry-corner-radius;
+        entry-text-left-padding: root.entry-text-left-padding; entry-text-right-padding: root.entry-text-right-padding;
+        icon-size: root.icon-size; icon-text-gap: root.icon-text-gap; shortcut-width: root.shortcut-width;
+        separator-height: root.separator-height; separator-inset: root.separator-inset;
+        entry-border-width: root.entry-border-width; entry-background: root.entry-background; entry-border-color: root.entry-border-color;
+        entry-hover-background: root.entry-hover-background; entry-text-color: root.entry-text-color; entry-shortcut-color: root.entry-shortcut-color;
+        entry-disabled-text-color: root.entry-disabled-text-color; entry-danger-text-color: root.entry-danger-text-color; separator-color: root.separator-color;
+        item-triggered(id) => { root.item-triggered(id); }
     }
 }
