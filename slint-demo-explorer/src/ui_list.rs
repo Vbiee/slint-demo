@@ -31,6 +31,8 @@ pub struct Column {
     pub alignment: i32,
     /// Enables the header resize handle; host must persist committed widths.
     pub resizable: bool,
+    /// Primary field can start drag on a selected row; configure at most one.
+    pub primary: bool,
     /// Cell text override; `None` uses selected/hover/normal theme color.
     pub text_color: Option<Color>,
     /// Cell background override; `None` leaves the row background visible.
@@ -81,6 +83,10 @@ pub enum Event {
     CommandRequested(i32),
     /// Column ID and committed width in logical pixels after resize release.
     ColumnResized { id: String, width: f32 },
+    /// A selected row began a primary-field drag; host resolves selected IDs.
+    DragStartRequested(String),
+    /// A selection drag reached this row; intended for gesture feedback.
+    SelectionDragged(String),
 }
 
 /// Host bridge to its generated Slint component. All methods must be provided;
@@ -108,6 +114,10 @@ pub trait Port {
     fn on_command_requested(&self, callback: impl Fn(i32) + 'static);
     /// Connect column ID and committed logical-pixel width.
     fn on_column_resized(&self, callback: impl Fn(String, f32) + 'static);
+    /// Forward primary-field drag request; this does not start native DnD.
+    fn on_drag_start_requested(&self, callback: impl Fn(String) + 'static);
+    /// Forward range-selection gesture feedback.
+    fn on_selection_dragged(&self, callback: impl Fn(String) + 'static);
 }
 
 pub fn set_columns(port: &impl Port, columns: Vec<Column>) {
@@ -153,5 +163,13 @@ pub fn bind(port: &impl Port, on_event: impl Fn(Event) + 'static) {
         let on_event = on_event.clone();
         move |command| on_event(Event::CommandRequested(command))
     });
-    port.on_column_resized(move |id, width| on_event(Event::ColumnResized { id, width }));
+    port.on_column_resized({
+        let on_event = on_event.clone();
+        move |id, width| on_event(Event::ColumnResized { id, width })
+    });
+    port.on_drag_start_requested({
+        let on_event = on_event.clone();
+        move |id| on_event(Event::DragStartRequested(id))
+    });
+    port.on_selection_dragged(move |id| on_event(Event::SelectionDragged(id)));
 }

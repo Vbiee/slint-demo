@@ -4022,6 +4022,7 @@ dependencies = [
 name = "slint-demo-tabs"
 version = "0.1.0"
 dependencies = [
+ "i-slint-backend-testing",
  "slint",
  "slint-build",
  "windows-sys 0.61.2",

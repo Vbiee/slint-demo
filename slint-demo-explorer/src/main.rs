@@ -61,6 +61,7 @@ impl ui_list::Port for AppWindow {
             .into_iter()
             .map(|column| ListColumn {
                 id: column.id.into(),
+                primary: column.primary,
                 title: column.title.into(),
                 width: column.width,
                 min_width: column.min_width,
@@ -143,6 +144,12 @@ impl ui_list::Port for AppWindow {
 
     fn on_selection_requested(&self, callback: impl Fn(String, i32) + 'static) {
         self.on_list_selection_requested(move |id, mode| callback(id.to_string(), mode));
+    }
+    fn on_drag_start_requested(&self, callback: impl Fn(String) + 'static) {
+        self.on_list_drag_start_requested(move |id| callback(id.to_string()));
+    }
+    fn on_selection_dragged(&self, callback: impl Fn(String) + 'static) {
+        self.on_list_selection_dragged(move |id| callback(id.to_string()));
     }
 
     fn on_focus_requested(&self, callback: impl Fn(String) + 'static) {
@@ -376,10 +383,10 @@ fn expand_location_ancestors(model: &ExplorerModel, expanded: &mut HashSet<Strin
 
 fn explorer_columns() -> Vec<ui_list::Column> {
     vec![
-        ui_list::Column { id: "name".into(), title: "Name".into(), width: -1.0, min_width: 220.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "modified".into(), title: "Date modified".into(), width: 150.0, min_width: 110.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "type".into(), title: "Type".into(), width: 120.0, min_width: 90.0, alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "size".into(), title: "Size".into(), width: 90.0, min_width: 70.0, alignment: 2, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "name".into(), title: "Name".into(), width: -1.0, min_width: 220.0, alignment: 0, resizable: true, primary: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "modified".into(), title: "Date modified".into(), width: 150.0, min_width: 110.0, alignment: 0, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "type".into(), title: "Type".into(), width: 120.0, min_width: 90.0, alignment: 0, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "size".into(), title: "Size".into(), width: 90.0, min_width: 70.0, alignment: 2, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
     ]
 }
 
@@ -582,6 +589,16 @@ fn main() -> Result<(), slint::PlatformError> {
             ui_list::Event::FocusRequested(id) => {
                 selection.borrow_mut().focused_id = id.clone();
                 if let Some(ui) = ui_weak.upgrade() { ui.set_list_focused_id(id.into()); }
+            }
+            ui_list::Event::DragStartRequested(id) => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_list_operation_status(format!("Drag start: {} selected ({id})", selection.borrow().ids.len()).into());
+                }
+            }
+            ui_list::Event::SelectionDragged(id) => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_list_operation_status(format!("Selecting: {} selected ({id})", selection.borrow().ids.len()).into());
+                }
             }
             ui_list::Event::ContextMenuRequested { id, x, y } => {
                 if let Some(ui) = ui_weak.upgrade() {

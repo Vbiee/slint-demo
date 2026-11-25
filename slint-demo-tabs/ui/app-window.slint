@@ -43,6 +43,8 @@ export component AppWindow inherits Window {
     callback explorer-tree-activated(string);
     callback explorer-list-selected(string);
     callback explorer-list-selection-requested(string, int);
+    callback explorer-list-drag-start-requested(string);
+    callback explorer-list-selection-dragged(string);
     callback explorer-list-focus-requested(string);
     callback explorer-list-activated(string);
     callback explorer-list-context-menu-requested(string, length, length);
@@ -222,6 +224,8 @@ export component AppWindow inherits Window {
                                     }
                                     selected(id) => { root.explorer-list-selected(id); }
                                     selection-requested(id, mode) => { root.explorer-list-selection-requested(id, mode); }
+                                    drag-start-requested(id) => { root.explorer-list-drag-start-requested(id); }
+                                    selection-dragged(id) => { root.explorer-list-selection-dragged(id); }
                                     focus-requested(id) => { root.explorer-list-focus-requested(id); }
                                     activated(id) => { root.explorer-list-activated(id); }
                                     context-menu-requested(id, x, y) => { root.explorer-list-context-menu-requested(id, x, y); }

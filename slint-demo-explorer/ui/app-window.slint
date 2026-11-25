@@ -27,6 +27,8 @@ export component AppWindow inherits Window {
     callback tree-activated(string);
     callback list-selected(string);
     callback list-selection-requested(string, int);
+    callback list-drag-start-requested(string);
+    callback list-selection-dragged(string);
     callback list-focus-requested(string);
     callback list-activated(string);
     callback list-context-menu-requested(string, length, length);
@@ -90,6 +92,8 @@ export component AppWindow inherits Window {
                         corner-radius: 10px;
                         selected(id) => { root.list-selected(id); }
                         selection-requested(id, mode) => { root.list-selection-requested(id, mode); }
+                        drag-start-requested(id) => { root.list-drag-start-requested(id); }
+                        selection-dragged(id) => { root.list-selection-dragged(id); }
                         focus-requested(id) => { root.list-focus-requested(id); }
                         activated(id) => { root.list-activated(id); }
                         context-menu-requested(id, x, y) => { root.list-context-menu-requested(id, x, y); }

@@ -89,6 +89,7 @@ impl ui_list::Port for AppWindow {
         self.set_explorer_list_columns(ModelRc::new(VecModel::from(columns.into_iter().map(|column| ListColumn {
             id: column.id.into(), title: column.title.into(), width: column.width,
             min_width: column.min_width, alignment: column.alignment, resizable: column.resizable,
+            primary: column.primary,
             text_color: column.text_color.unwrap_or_else(transparent_color), has_text_color: column.text_color.is_some(),
             background_color: column.background_color.unwrap_or_else(transparent_color), has_background_color: column.background_color.is_some(),
             header_text_color: column.header_text_color.unwrap_or_else(transparent_color), has_header_text_color: column.header_text_color.is_some(),
@@ -126,6 +127,8 @@ impl ui_list::Port for AppWindow {
     }
     fn on_selected(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_selected(move |id| callback(id.to_string())); }
     fn on_selection_requested(&self, callback: impl Fn(String, i32) + 'static) { self.on_explorer_list_selection_requested(move |id, mode| callback(id.to_string(), mode)); }
+    fn on_drag_start_requested(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_drag_start_requested(move |id| callback(id.to_string())); }
+    fn on_selection_dragged(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_selection_dragged(move |id| callback(id.to_string())); }
     fn on_focus_requested(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_focus_requested(move |id| callback(id.to_string())); }
     fn on_activated(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_activated(move |id| callback(id.to_string())); }
     fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static) { self.on_explorer_list_context_menu_requested(move |id, x, y| callback(id.to_string(), x, y)); }
@@ -144,10 +147,10 @@ impl ExplorerIcons {
 
 fn explorer_columns() -> Vec<ui_list::Column> {
     vec![
-        ui_list::Column { id: "name".into(), title: "Name".into(), width: -1., min_width: 220., alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "modified".into(), title: "Date modified".into(), width: 150., min_width: 110., alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "type".into(), title: "Type".into(), width: 120., min_width: 90., alignment: 0, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
-        ui_list::Column { id: "size".into(), title: "Size".into(), width: 90., min_width: 70., alignment: 2, resizable: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "name".into(), title: "Name".into(), width: -1., min_width: 220., alignment: 0, resizable: true, primary: true, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "modified".into(), title: "Date modified".into(), width: 150., min_width: 110., alignment: 0, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "type".into(), title: "Type".into(), width: 120., min_width: 90., alignment: 0, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
+        ui_list::Column { id: "size".into(), title: "Size".into(), width: 90., min_width: 70., alignment: 2, resizable: true, primary: false, text_color: None, background_color: None, header_text_color: None, header_background_color: None },
     ]
 }
 
@@ -312,6 +315,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 selected.borrow_mut().request(id, mode, &list_ids(&ui));
                 publish_selection(&ui, &selected.borrow());
             },
+            ui_list::Event::DragStartRequested(id) => if let Some(ui) = ui_weak.upgrade() {
+                ui.set_explorer_operation_status(format!("Drag start: {} selected ({})", selected.borrow().ids.len(), path_label(Path::new(&id))).into());
+            },
+            ui_list::Event::SelectionDragged(id) => if let Some(ui) = ui_weak.upgrade() {
+                ui.set_explorer_operation_status(format!("Selecting: {} selected ({})", selected.borrow().ids.len(), path_label(Path::new(&id))).into());
+            },
             ui_list::Event::FocusRequested(id) => {
                 selected.borrow_mut().focused_id = id.clone();
                 if let Some(ui) = ui_weak.upgrade() { ui.set_explorer_list_focused_id(id.into()); }
@@ -473,5 +482,65 @@ mod tests {
         assert!(!selection.ids.contains("b"));
         selection.clear();
         assert!(selection.ids.is_empty() && selection.focused_id.is_empty() && selection.anchor_id.is_empty());
+    }
+
+    #[test]
+    fn list_primary_drag_and_selection_drag_are_distinct() {
+        use super::*;
+        use slint::platform::{PointerEventButton, WindowEvent};
+        use slint::{LogicalPosition, LogicalSize};
+
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().unwrap();
+        ui.window().set_size(LogicalSize::new(900., 580.));
+        ui.set_primary_active_tab_id("explorer".into());
+        ui_list::set_columns(&ui, explorer_columns());
+        let rows = (0..4).map(|index| ui_list::Row {
+            id: format!("row-{index}"), selected: index < 2, cells: vec![],
+        }).collect();
+        ui_list::set_rows(&ui, rows);
+        let drags = Rc::new(RefCell::new(Vec::<String>::new()));
+        let selections = Rc::new(RefCell::new(Vec::<(String, i32)>::new()));
+        let range = Rc::new(RefCell::new(Vec::<String>::new()));
+        ui.on_explorer_list_drag_start_requested({ let events = drags.clone(); move |id| events.borrow_mut().push(id.to_string()) });
+        ui.on_explorer_list_selection_requested({ let events = selections.clone(); move |id, mode| events.borrow_mut().push((id.to_string(), mode)) });
+        ui.on_explorer_list_selection_dragged({ let events = range.clone(); move |id| events.borrow_mut().push(id.to_string()) });
+        ui.show().unwrap();
+        let pointer = |x, y| LogicalPosition::new(x, y);
+        let press = |x, y| ui.window().dispatch_event(WindowEvent::PointerPressed { position: pointer(x, y), button: PointerEventButton::Left });
+        let motion = |x, y| ui.window().dispatch_event(WindowEvent::PointerMoved { position: pointer(x, y) });
+        let release = |x, y| ui.window().dispatch_event(WindowEvent::PointerReleased { position: pointer(x, y), button: PointerEventButton::Left });
+
+        // Name is primary: selected row drag must not emit selection/click.
+        motion(300., 205.); press(300., 205.); motion(310., 205.); release(310., 205.);
+        assert_eq!(&*drags.borrow(), &["row-0"]);
+        assert!(selections.borrow().is_empty());
+        // Date modified is non-primary: drag extends the range, never starts drag.
+        motion(620., 205.); press(620., 205.); motion(620., 245.); release(620., 245.);
+        assert_eq!(drags.borrow().len(), 1);
+        assert!(selections.borrow().iter().any(|(id, mode)| id == "row-1" && *mode == 2));
+        assert!(range.borrow().iter().any(|id| id == "row-1"));
+        // A click in a primary field still requests selection once.
+        selections.borrow_mut().clear();
+        motion(300., 205.); press(300., 205.); release(300., 205.);
+        assert_eq!(&*selections.borrow(), &[("row-0".into(), 0)]);
+        // An unselected primary row cannot start an item drag.
+        selections.borrow_mut().clear();
+        motion(300., 277.); press(300., 277.); motion(310., 277.); release(310., 277.);
+        assert_eq!(drags.borrow().len(), 1);
+        // Small movement is still a click, not a drag.
+        selections.borrow_mut().clear();
+        motion(300., 205.); press(300., 205.); motion(302., 205.); release(302., 205.);
+        assert_eq!(drags.borrow().len(), 1);
+        assert_eq!(&*selections.borrow(), &[("row-0".into(), 0)]);
+        // Primary is caller-configured, not tied to the first column.
+        let mut columns = explorer_columns();
+        columns[0].primary = false;
+        columns[1].primary = true;
+        ui_list::set_columns(&ui, columns);
+        selections.borrow_mut().clear();
+        motion(620., 205.); press(620., 205.); motion(630., 205.); release(630., 205.);
+        assert_eq!(&*drags.borrow(), &["row-0", "row-0"]);
+        assert!(selections.borrow().is_empty());
     }
 }
