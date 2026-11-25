@@ -130,8 +130,11 @@ export component AppWindow inherits Window {
                         // It deliberately occupies the viewport it receives
                         // from the tab. UiTree and UiList keep their own
                         // scrolling/input behavior inside this document.
-                        width: parent.width;
-                        height: parent.height;
+                        // `parent` is the UiTabGroup itself (slot children
+                        // resolve `parent` lexically), so size to the
+                        // viewport it exposes, not to the whole group.
+                        width: parent.content-width;
+                        height: parent.content-height;
                         background: #171a21;
                         VerticalLayout {
                             padding: 10px;
@@ -206,8 +209,8 @@ export component AppWindow inherits Window {
                         }
                     }
                     if root.primary-active-tab-id != "explorer" : Rectangle {
-                        width: parent.width;
-                        height: parent.height;
+                        width: parent.content-width;
+                        height: parent.content-height;
                         background: #1b222d;
                         Text { text: root.primary-active-tab-id == "" ? "Empty document group" : "Primary group: " + root.primary-active-tab-id; color: #aeb9c9; horizontal-alignment: center; vertical-alignment: center; }
                     }

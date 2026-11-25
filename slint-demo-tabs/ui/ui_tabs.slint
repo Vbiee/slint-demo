@@ -225,7 +225,12 @@ export component UiTabGroup inherits Rectangle {
     out property <length> content-y: root.tab-placement == 0 ? root.tab-height : 0px;
     out property <length> content-width: root.width - ((root.tab-placement == 2 || root.tab-placement == 3) ? root.side-tab-width : 0px);
     out property <length> content-height: root.height - ((root.tab-placement == 0 || root.tab-placement == 1) ? root.tab-height : 0px);
-    // `content-{width,height}` above are viewport dimensions. These report
+    // `content-{width,height}` above are viewport dimensions. A hosted
+    // document that wants to fill the viewport must bind to these, NOT to
+    // `parent.width/height`: inside the caller's tree `parent` is this group,
+    // whose height also includes the tab strip, so the document would be one
+    // strip taller than the viewport and get clipped at the top/bottom.
+    // These report
     // the hosted module's actual extent and allow the host to persist scroll.
     out property <length> scroll-content-width <=> content-viewport.content-width;
     out property <length> scroll-content-height <=> content-viewport.content-height;
