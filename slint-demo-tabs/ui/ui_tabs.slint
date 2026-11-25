@@ -1,16 +1,53 @@
+// === UiTabGroup contract ====================================================
+// DEPENDENCY: ui_scroll_view.slint. Optional Rust state: src/ui_tabs.rs. HOST
+// OWNS: bounded size, document lifetime, content association and its callbacks;
+// it can manage tab models/active IDs itself or use the Rust Workspace helper.
+// INPUT tabs: [TabItem] with stable unique id, title, enabled, closable, icon,
+// has-icon, icon-size, text-color and has-text-color. active-id identifies the
+// current item; the host keeps it consistent with tabs and displayed content.
+// SLOT @children: caller chooses which document to instantiate for active-id.
+// In a slot child `parent` is UiTabGroup, not the scroll viewport. Bind its
+// width/height to parent.content-width/content-height to fill the viewport;
+// declare a larger extent explicitly if the document should overflow/scroll.
+// CALLBACKS: tab-selected(id) requests activation; tab-close-requested(id)
+// requests close. Host updates active-id/tabs and determines the next active ID.
+// GEOMETRY OUTPUTS: content-x/y/width/height describe the content viewport.
+// scroll-content-width/height report scrollable extent; content-scroll-x/y are
+// read/write scroll offsets. content-horizontal-scrollbar-enabled defaults true;
+// clip-content true; content-surface-visible false; debug-bounds false.
+// OPTIONS: tab-placement 0 top, 1 bottom, 2 left, 3 right; tab-height 34px,
+// side-tab-width 156px, tab-min-width 104px, tab-max-width 220px. Remaining
+// spacing, corner and color inputs and their defaults are declared below.
+// LIMITS: group does not own or forward a hosted component's models or events;
+// nested scrolling/input behavior must be checked with the actual child.
+//
+// === UiTabWorkspace contract ================================================
+// INPUTS: bounded size, split-enabled (false), split-direction (0 left/right,
+// 1 top/bottom), split-ratio (0.65, in-out), splitter-thickness (6px), pane
+// minimum sizes (160px), clip-content (false), splitter colors.
+// SLOT @children: host creates and owns groups; bind each group's x/y/width/
+// height to first-pane-* or second-pane-* outputs, and hide second when unsplit.
+// CALLBACK split-ratio-changed(ratio): observe/persist split changes as needed.
+// LIMITS: computes at most two pane rectangles; no tab model or split tree.
 import { UiScrollView } from "ui_scroll_view.slint";
 
 // Document-tab primitives. A group owns only document navigation; its caller
 // owns the document content and reacts to the emitted primitive events.
 export struct TabItem {
+    // Stable unique ID used by active-id and callbacks.
     id: string,
+    // Header label, elided when constrained.
     title: string,
+    // Caller-loaded image; has-icon enables it and icon-size sets its size.
     icon: image,
     has-icon: bool,
     icon-size: length,
+    // Optional header text override, used only when has-text-color is true.
     text-color: color,
     has-text-color: bool,
+    // Show close control; host still decides whether to close on request.
     closable: bool,
+    // Enable header/close interaction; caller controls this flag.
     enabled: bool,
 }
 
@@ -32,6 +69,7 @@ component TabButton inherits Rectangle {
     in property <int> placement: 0;
     in property <color> panel-background-color;
     in property <color> panel-border-color;
+    // Fill of the tab header strip.
     in property <color> strip-background-color;
     in property <color> active-color;
     in property <color> hover-color;
@@ -191,39 +229,64 @@ component TabButton inherits Rectangle {
 export component UiTabGroup inherits Rectangle {
     in property <[TabItem]> tabs;
     in-out property <string> active-id: "";
+    // 0 top, 1 bottom, 2 left, 3 right.
     in property <int> tab-placement: 0;
+    // Height of horizontal strip and of tab headers.
     in property <length> tab-height: 34px;
+    // Width of left or right tab strip.
     in property <length> side-tab-width: 156px;
+    // Minimum horizontal tab-header width.
     in property <length> tab-min-width: 104px;
+    // Maximum horizontal tab-header width.
     in property <length> tab-max-width: 220px;
+    // Horizontal inset inside tab headers.
     in property <length> tab-horizontal-padding: 12px;
+    // Header corner radius.
     in property <length> tab-corner-radius: 6px;
     // Adjacent document tabs share one vertical separator. Paths stroke on
     // their own half-pixel edge, so one pixel overlap removes the dark seam.
+    // Space between headers before border overlap.
     in property <length> tab-gap: 0px;
+    // Overlap used to share borders of neighboring tabs.
     in property <length> shared-tab-border-overlap: 1px;
     // The panel is a bounded viewport. A hosted module declares its own
     // size; overflow scrolls automatically.
+    // Allow horizontal content scrollbar when needed.
     in property <bool> content-horizontal-scrollbar-enabled: true;
     in property <bool> clip-content: true;
+    // Paint content background and border.
     in property <bool> content-surface-visible: false;
+    // Fill of the tab group.
     in property <color> background-color: transparent;
     in property <color> strip-background-color: #202733;
     // Keep the active tab and content surface equal for a joined outline.
+    // Fill of the active header.
     in property <color> active-tab-color: #1b222d;
+    // Fill of a hovered inactive header.
     in property <color> hover-tab-color: #283444;
+    // Default inactive header text color.
     in property <color> tab-text-color: #aeb9c9;
+    // Active header text color, unless item overrides it.
     in property <color> active-tab-text-color: #f1f5f9;
+    // Disabled header text color, unless item overrides it.
     in property <color> disabled-tab-text-color: #687486;
+    // Content surface fill when enabled.
     in property <color> content-background-color: #1b222d;
+    // Content and header outline color.
     in property <color> content-border-color: #354154;
     // Diagnostic geometry overlay. It belongs to the tab primitive so every
     // hosted module can verify the group boundary versus its content viewport.
+    // Show diagnostic group and viewport outlines.
     in property <bool> debug-bounds: false;
+    // Diagnostic outline color.
     in property <color> debug-bounds-color: #ff3b30;
+    // Content viewport x coordinate within the group.
     out property <length> content-x: root.tab-placement == 2 ? root.side-tab-width : 0px;
+    // Content viewport y coordinate within the group.
     out property <length> content-y: root.tab-placement == 0 ? root.tab-height : 0px;
+    // Content viewport width excluding side strip.
     out property <length> content-width: root.width - ((root.tab-placement == 2 || root.tab-placement == 3) ? root.side-tab-width : 0px);
+    // Content viewport height excluding top/bottom strip.
     out property <length> content-height: root.height - ((root.tab-placement == 0 || root.tab-placement == 1) ? root.tab-height : 0px);
     // `content-{width,height}` above are viewport dimensions. A hosted
     // document that wants to fill the viewport must bind to these, NOT to
@@ -232,9 +295,13 @@ export component UiTabGroup inherits Rectangle {
     // strip taller than the viewport and get clipped at the top/bottom.
     // These report
     // the hosted module's actual extent and allow the host to persist scroll.
+    // Measured scrollable document width.
     out property <length> scroll-content-width <=> content-viewport.content-width;
+    // Measured scrollable document height.
     out property <length> scroll-content-height <=> content-viewport.content-height;
+    // Read/write horizontal document scroll offset.
     in-out property <length> content-scroll-x <=> content-viewport.content-x;
+    // Read/write vertical document scroll offset.
     in-out property <length> content-scroll-y <=> content-viewport.content-y;
     callback tab-selected(string);
     callback tab-close-requested(string);
@@ -374,30 +441,46 @@ export component UiTabGroup inherits Rectangle {
 // document contents: callers bind UiTabGroup rectangles to the exported pane
 // geometry and keep the split tree/state in their own host model.
 export component UiTabWorkspace inherits Rectangle {
+    // Enable the second pane and divider.
     in property <bool> split-enabled: false;
     // 0 = left/right groups, 1 = top/bottom groups.
+    // 0 side by side; 1 stacked vertically.
     in property <int> split-direction: 0;
+    // Read/write divider position ratio.
     in-out property <float> split-ratio: 0.65;
+    // Thickness of the divider.
     in property <length> splitter-thickness: 6px;
+    // First-pane minimum enforced during divider dragging.
     in property <length> first-pane-min-size: 160px;
+    // Second-pane minimum enforced during divider dragging.
     in property <length> second-pane-min-size: 160px;
     // Do not clip hosted modules unless the caller explicitly wants a strict
     // viewport. This preserves popups, shadows and deliberate overflow.
     in property <bool> clip-content: false;
+    // Idle divider color.
     in property <color> splitter-color: #263140;
+    // Hovered or dragged divider color.
     in property <color> splitter-hover-color: #4d6685;
+    // First pane x in workspace coordinates.
     out property <length> first-pane-x: 0px;
+    // First pane y in workspace coordinates.
     out property <length> first-pane-y: 0px;
+    // Computed width of first pane.
     out property <length> first-pane-width: root.split-enabled && root.split-direction == 0
         ? max(0px, min(root.width - root.splitter-thickness, root.width * root.split-ratio)) : root.width;
+    // Computed height of first pane.
     out property <length> first-pane-height: root.split-enabled && root.split-direction == 1
         ? max(0px, min(root.height - root.splitter-thickness, root.height * root.split-ratio)) : root.height;
+    // Second pane x in workspace coordinates.
     out property <length> second-pane-x: root.split-enabled && root.split-direction == 0
         ? root.first-pane-width + root.splitter-thickness : 0px;
+    // Second pane y in workspace coordinates.
     out property <length> second-pane-y: root.split-enabled && root.split-direction == 1
         ? root.first-pane-height + root.splitter-thickness : 0px;
+    // Computed width of second pane.
     out property <length> second-pane-width: root.split-enabled && root.split-direction == 0
         ? max(0px, root.width - root.second-pane-x) : root.width;
+    // Computed height of second pane.
     out property <length> second-pane-height: root.split-enabled && root.split-direction == 1
         ? max(0px, root.height - root.second-pane-y) : root.height;
     callback split-ratio-changed(float);

@@ -1,21 +1,47 @@
+// === UiScrollView contract ==================================================
+// HOST: give the viewport bounded width/height and place measurable content in
+// @children. This component clips content and uses overlay scrollbars.
+// INPUTS: enabled (true: scrollbar interaction), horizontal-scrollbar-enabled
+// (true), thumb-width 6px, grab-width 10px, min-thumb-length 24px,
+// scrollbar-inset 3px, track-color, thumb-color and thumb-hover-color.
+// IN-OUT: content-x/y are Flickable offsets, negative when scrolled right/down.
+// OUTPUTS: content-width/height and visible-width/height report geometry.
+// CALLBACKS: none. Mouse-drag panning is disabled; `enabled` controls scrollbar
+// hit areas, not all input to the child or Flickable. Separate implementation
+// from Explorer's scroll view: its minimum-thumb property has a different name.
 // A presentation-neutral scrolling viewport for modules hosted in a tab.
 // Its child declares its own size; this component only provides the viewport,
 // two-axis panning and theme-owned overlay scrollbars.
 export component UiScrollView inherits Rectangle {
+    // Enable scrollbar pointer interaction; child input remains independent.
     in property <bool> enabled: true;
+    // Show horizontal scrollbar when content overflows.
     in property <bool> horizontal-scrollbar-enabled: true;
+    // Drawn scrollbar thickness.
     in property <length> thumb-width: 6px;
+    // Pointer hit-target thickness.
     in property <length> grab-width: 10px;
+    // Minimum thumb length on either axis.
     in property <length> min-thumb-length: 24px;
+    // Inset of scrollbars from viewport edges.
     in property <length> scrollbar-inset: 3px;
+    // Scrollbar track color.
     in property <color> track-color: #252b3440;
+    // Idle thumb color.
     in property <color> thumb-color: #6b77884d;
+    // Hovered/dragged thumb color.
     in property <color> thumb-hover-color: #8491a4;
+    // Measured scrollable content height.
     out property <length> content-height <=> flickable.content-height;
+    // Read/write vertical content offset.
     in-out property <length> content-y <=> flickable.content-y;
+    // Measured scrollable content width.
     out property <length> content-width <=> flickable.content-width;
+    // Read/write horizontal content offset.
     in-out property <length> content-x <=> flickable.content-x;
+    // Viewport height.
     out property <length> visible-height <=> flickable.height;
+    // Viewport width.
     out property <length> visible-width <=> flickable.width;
     property <length> vertical-maximum: max(0px, flickable.content-height - flickable.height);
     property <length> horizontal-maximum: max(0px, flickable.content-width - flickable.width);

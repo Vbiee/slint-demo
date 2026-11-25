@@ -1,9 +1,17 @@
-//! Caller-facing modal contract; no application business logic belongs here.
+//! Demo-host adapter for an in-app modal; no business logic belongs here.
+//!
+//! Required: this demo's generated `crate::AppWindow` properties/callbacks;
+//! this Rust adapter is therefore host-specific. The standalone
+//! `ui/ui_modal.slint` is independent and does not require this adapter.
+//! `set_open` updates caller-owned visibility. `bind` forwards confirmation and
+//! cancellation requests; the caller must close the modal and perform actions.
 
 use crate::AppWindow;
 
 pub enum Event {
+    /// User clicked the confirm button.
     Confirmed,
+    /// User clicked cancel or the backdrop.
     Cancelled,
 }
 

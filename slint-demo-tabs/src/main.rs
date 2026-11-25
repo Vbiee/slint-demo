@@ -13,6 +13,7 @@ mod explorer_model;
 mod ui_tree;
 #[path = "../../slint-demo-explorer/src/ui_list.rs"]
 mod ui_list;
+mod ui_tabs;
 
 use std::{
     cell::{Cell, RefCell},
@@ -32,21 +33,12 @@ fn document_icon() -> Image {
     Image::load_from_svg_data(DOCUMENT_ICON_SVG.as_bytes()).unwrap_or_default()
 }
 
-fn tab_item(id: &str, title: &str, closable: bool, text_color: Option<Color>) -> TabItem {
-    TabItem {
-        id: id.into(),
-        title: title.into(),
-        icon: document_icon(),
-        has_icon: true,
-        icon_size: 16.,
-        text_color: text_color.unwrap_or_else(|| Color::from_argb_u8(0, 0, 0, 0)),
-        has_text_color: text_color.is_some(),
-        closable,
-        enabled: true,
-    }
+fn tab_item(id: &str, title: &str, closable: bool, text_color: Option<Color>) -> ui_tabs::Tab {
+    ui_tabs::Tab { id: id.into(), title: title.into(), icon: Some(document_icon()),
+        icon_size: 16., text_color, closable, enabled: true }
 }
 
-fn tabs() -> Vec<TabItem> {
+fn tabs() -> Vec<ui_tabs::Tab> {
     vec![
         tab_item("explorer", "Explorer", false, None),
         tab_item("welcome", "Welcome", true, None),
@@ -55,13 +47,21 @@ fn tabs() -> Vec<TabItem> {
     ]
 }
 
-fn push_models(
-    ui: &AppWindow,
-    primary: &[TabItem],
-    secondary: &[TabItem],
-) {
-    ui.set_primary_tabs(ModelRc::new(VecModel::from(primary.to_vec())));
-    ui.set_secondary_tabs(ModelRc::new(VecModel::from(secondary.to_vec())));
+// Demo-specific bridge: the reusable tab state never imports AppWindow or
+// generated Slint types; each host maps its groups to its own properties.
+fn push_models(ui: &AppWindow, workspace: &ui_tabs::Workspace) {
+    let convert = |group: &ui_tabs::Group| ModelRc::new(VecModel::from(group.tabs().iter().map(|tab| TabItem {
+        id: tab.id.clone().into(), title: tab.title.clone().into(),
+        icon: tab.icon.clone().unwrap_or_default(), has_icon: tab.icon.is_some(), icon_size: tab.icon_size,
+        text_color: tab.text_color.unwrap_or_else(transparent_color), has_text_color: tab.text_color.is_some(),
+        closable: tab.closable, enabled: tab.enabled,
+    }).collect::<Vec<_>>()));
+    let primary = workspace.group("primary").expect("demo primary group");
+    let secondary = workspace.group("secondary").expect("demo secondary group");
+    ui.set_primary_tabs(convert(primary));
+    ui.set_secondary_tabs(convert(secondary));
+    ui.set_primary_active_tab_id(primary.active_id().unwrap_or("").into());
+    ui.set_secondary_active_tab_id(secondary.active_id().unwrap_or("").into());
 }
 
 fn transparent_color() -> Color { Color::from_argb_u8(0, 0, 0, 0) }
@@ -81,7 +81,7 @@ impl ui_tree::Port for AppWindow {
     fn on_expansion_toggled(&self, callback: impl Fn(String) + 'static) {
         self.on_explorer_tree_expansion_toggled(move |id| callback(id.to_string()));
     }
-    fn on_activated(&self, _callback: impl Fn(String) + 'static) {}
+    fn on_activated(&self, callback: impl Fn(String) + 'static) { self.on_explorer_tree_activated(move |id| callback(id.to_string())); }
 }
 
 impl ui_list::Port for AppWindow {
@@ -115,20 +115,21 @@ impl ui_list::Port for AppWindow {
         }).collect::<Vec<_>>())));
     }
     fn set_selection(&self, ids: &[String]) {
+        let selected_ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
         let rows = self.get_explorer_list_rows();
         for index in 0..rows.row_count() {
             if let Some(mut row) = rows.row_data(index) {
-                let selected = ids.iter().any(|id| row.id.as_str() == id);
+                let selected = selected_ids.contains(row.id.as_str());
                 if row.selected != selected { row.selected = selected; rows.set_row_data(index, row); }
             }
         }
     }
     fn on_selected(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_selected(move |id| callback(id.to_string())); }
-    fn on_selection_requested(&self, _callback: impl Fn(String, i32) + 'static) {}
+    fn on_selection_requested(&self, callback: impl Fn(String, i32) + 'static) { self.on_explorer_list_selection_requested(move |id, mode| callback(id.to_string(), mode)); }
     fn on_focus_requested(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_focus_requested(move |id| callback(id.to_string())); }
     fn on_activated(&self, callback: impl Fn(String) + 'static) { self.on_explorer_list_activated(move |id| callback(id.to_string())); }
-    fn on_context_menu_requested(&self, _callback: impl Fn(String, f32, f32) + 'static) {}
-    fn on_command_requested(&self, _callback: impl Fn(i32) + 'static) {}
+    fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static) { self.on_explorer_list_context_menu_requested(move |id, x, y| callback(id.to_string(), x, y)); }
+    fn on_command_requested(&self, callback: impl Fn(i32) + 'static) { self.on_explorer_list_command_requested(callback); }
     fn on_column_resized(&self, callback: impl Fn(String, f32) + 'static) { self.on_explorer_list_column_resized(move |id, width| callback(id.to_string(), width)); }
 }
 
@@ -172,12 +173,62 @@ fn append_tree(path: &Path, depth: usize, section: &str, current: &Path, expande
     }
 }
 
-fn refresh_explorer(ui: &AppWindow, model: &explorer_model::ExplorerModel, selected: &str, expanded: &HashSet<String>, icons: &ExplorerIcons, reload_rows: bool) {
+#[derive(Default)]
+struct ExplorerSelection {
+    ids: HashSet<String>,
+    focused_id: String,
+    anchor_id: String,
+}
+
+impl ExplorerSelection {
+    fn clear(&mut self) { *self = Self::default(); }
+    fn replace(&mut self, id: String) {
+        self.ids.clear();
+        self.ids.insert(id.clone());
+        self.anchor_id = id.clone();
+        self.focused_id = id;
+    }
+    fn request(&mut self, id: String, mode: i32, ordered_ids: &[String]) {
+        if !ordered_ids.contains(&id) { return; }
+        match mode {
+            1 => {
+                if !self.ids.insert(id.clone()) { self.ids.remove(&id); }
+                self.anchor_id = id.clone();
+                self.focused_id = id;
+            }
+            2 => {
+                let anchor = ordered_ids.iter().position(|item| item == &self.anchor_id);
+                let target = ordered_ids.iter().position(|item| item == &id);
+                if let (Some(a), Some(b)) = (anchor, target) {
+                    self.ids = ordered_ids[a.min(b)..=a.max(b)].iter().cloned().collect();
+                    self.focused_id = id;
+                } else { self.replace(id); }
+            }
+            _ => self.replace(id),
+        }
+    }
+}
+
+fn list_ids(ui: &AppWindow) -> Vec<String> {
+    let rows = ui.get_explorer_list_rows();
+    (0..rows.row_count()).filter_map(|index| rows.row_data(index).map(|row| row.id.to_string())).collect()
+}
+
+fn publish_selection(ui: &AppWindow, selection: &ExplorerSelection) {
+    let ids = selection.ids.iter().cloned().collect::<Vec<_>>();
+    ui_list::set_selection(ui, &ids);
+    ui.set_explorer_list_focused_id(selection.focused_id.clone().into());
+    ui.set_explorer_operation_status(format!("{} selected", ids.len()).into());
+}
+
+fn refresh_explorer(ui: &AppWindow, model: &explorer_model::ExplorerModel, selected: &ExplorerSelection, expanded: &HashSet<String>, icons: &ExplorerIcons, reload_rows: bool) {
     ui.set_explorer_location(model.location().display().to_string().into());
+    ui.set_explorer_list_focused_id(selected.focused_id.clone().into());
+    ui.set_explorer_operation_status(format!("{} selected", selected.ids.len()).into());
     ui_tree::set_nodes(ui, explorer_tree(model, expanded, icons));
     if reload_rows {
         let rows = model.entries().into_iter().map(|entry| ui_list::Row {
-            id: entry.path.to_string_lossy().into_owned(), selected: entry.path.to_string_lossy() == selected,
+            id: entry.path.to_string_lossy().into_owned(), selected: selected.ids.contains(entry.path.to_string_lossy().as_ref()),
             cells: vec![
                 ui_list::Cell { text: entry.name, icon: Some(if entry.is_folder { icons.folder.clone() } else { icons.file.clone() }), icon_size: 18., text_color: None, background_color: None },
                 ui_list::Cell { text: entry.modified, icon: None, icon_size: 0., text_color: None, background_color: None },
@@ -200,16 +251,17 @@ fn main() -> Result<(), slint::PlatformError> {
         },
         corner_radius: 0.0,
     });
-    let primary_tabs = Rc::new(RefCell::new(tabs()));
-    let secondary_tabs = Rc::new(RefCell::new(Vec::<TabItem>::new()));
-    let active_group = Rc::new(RefCell::new(String::from("primary")));
+    let mut initial_workspace = ui_tabs::Workspace::new(&["primary", "secondary"]).expect("valid demo groups");
+    for tab in tabs() { initial_workspace.add("primary", tab, false); }
+    initial_workspace.activate("primary", "welcome");
+    let workspace = Rc::new(RefCell::new(initial_workspace));
     let next_tab_number = Rc::new(Cell::new(1_u32));
-    push_models(&ui, &primary_tabs.borrow(), &secondary_tabs.borrow());
+    push_models(&ui, &workspace.borrow());
 
     // This is a real hosted document, not a mock: filesystem state belongs
     // to this host and is projected into the reusable tree/list contracts.
     let explorer_model = Rc::new(RefCell::new(explorer_model::ExplorerModel::new()));
-    let explorer_selected = Rc::new(RefCell::new(String::new()));
+    let explorer_selected = Rc::new(RefCell::new(ExplorerSelection::default()));
     let explorer_expanded = Rc::new(RefCell::new(HashSet::<String>::new()));
     let explorer_columns_state = Rc::new(RefCell::new(explorer_columns()));
     let explorer_icons = Rc::new(ExplorerIcons::load());
@@ -217,7 +269,7 @@ fn main() -> Result<(), slint::PlatformError> {
         explorer_expanded.borrow_mut().insert(path_id(ancestor));
     }
     ui_list::set_columns(&ui, explorer_columns_state.borrow().clone());
-    refresh_explorer(&ui, &explorer_model.borrow(), "", &explorer_expanded.borrow(), &explorer_icons, true);
+    refresh_explorer(&ui, &explorer_model.borrow(), &explorer_selected.borrow(), &explorer_expanded.borrow(), &explorer_icons, true);
 
     ui.on_explorer_navigate_up({
         let ui_weak = ui.as_weak(); let model = explorer_model.clone(); let selected = explorer_selected.clone();
@@ -242,7 +294,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let reload = match event {
                 ui_tree::Event::Selected(id) => model.borrow_mut().navigate(PathBuf::from(id)),
                 ui_tree::Event::ExpansionToggled(id) => { let mut set = expanded.borrow_mut(); if !set.insert(id.clone()) { set.remove(&id); } false }
-                ui_tree::Event::Activated(_) => false,
+                ui_tree::Event::Activated(id) => model.borrow_mut().navigate(PathBuf::from(id)),
             };
             if reload { selected.borrow_mut().clear(); }
             if let Some(ui) = ui_weak.upgrade() { refresh_explorer(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &icons, reload); }
@@ -252,11 +304,43 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak(); let model = explorer_model.clone(); let selected = explorer_selected.clone();
         let expanded = explorer_expanded.clone(); let icons = explorer_icons.clone(); let columns = explorer_columns_state.clone();
         move |event| match event {
-            ui_list::Event::Selected(id) => {
-                *selected.borrow_mut() = id;
-                if let Some(ui) = ui_weak.upgrade() { ui_list::set_selection(&ui, &[selected.borrow().clone()]); }
+            ui_list::Event::Selected(id) => if let Some(ui) = ui_weak.upgrade() {
+                selected.borrow_mut().replace(id);
+                publish_selection(&ui, &selected.borrow());
+            },
+            ui_list::Event::SelectionRequested { id, mode } => if let Some(ui) = ui_weak.upgrade() {
+                selected.borrow_mut().request(id, mode, &list_ids(&ui));
+                publish_selection(&ui, &selected.borrow());
+            },
+            ui_list::Event::FocusRequested(id) => {
+                selected.borrow_mut().focused_id = id.clone();
+                if let Some(ui) = ui_weak.upgrade() { ui.set_explorer_list_focused_id(id.into()); }
             }
-            ui_list::Event::FocusRequested(id) => if let Some(ui) = ui_weak.upgrade() { ui.set_explorer_list_focused_id(id.into()); },
+            ui_list::Event::ContextMenuRequested { id, x, y } => if let Some(ui) = ui_weak.upgrade() {
+                if !selected.borrow().ids.contains(&id) { selected.borrow_mut().replace(id); }
+                publish_selection(&ui, &selected.borrow());
+                ui.set_explorer_menu_x(x);
+                ui.set_explorer_menu_y(y);
+                ui.set_explorer_menu_open(true);
+            },
+            ui_list::Event::CommandRequested(command) => if let Some(ui) = ui_weak.upgrade() {
+                match command {
+                    6 => {
+                        let ids = list_ids(&ui);
+                        let mut state = selected.borrow_mut();
+                        state.ids = ids.iter().cloned().collect();
+                        if state.focused_id.is_empty() { state.focused_id = ids.first().cloned().unwrap_or_default(); }
+                        state.anchor_id = state.focused_id.clone();
+                    }
+                    7 => selected.borrow_mut().clear(),
+                    _ => {}
+                }
+                publish_selection(&ui, &selected.borrow());
+                if (1..=5).contains(&command) {
+                    let action = ["", "Rename", "Delete", "Copy", "Cut", "Paste"][command as usize];
+                    ui.set_explorer_operation_status(format!("{action}: not implemented").into());
+                }
+            },
             ui_list::Event::Activated(id) => {
                 if model.borrow_mut().navigate(PathBuf::from(id)) { selected.borrow_mut().clear();
                     if let Some(ui) = ui_weak.upgrade() { refresh_explorer(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &icons, true); }
@@ -266,81 +350,45 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(column) = columns.borrow_mut().iter_mut().find(|column| column.id == id) { column.width = width; }
                 if let Some(ui) = ui_weak.upgrade() { ui_list::set_column_width(&ui, &id, width); }
             }
-            _ => {}
         }
     });
 
     ui.on_tab_selected({
         let ui_weak = ui.as_weak();
-        let active_group = active_group.clone();
+        let workspace = workspace.clone();
         move |group: SharedString, id: SharedString| {
+            if !workspace.borrow_mut().activate(group.as_str(), id.as_str()) { return; }
             if let Some(ui) = ui_weak.upgrade() {
-                *active_group.borrow_mut() = group.to_string();
-                if group == "primary" {
-                    ui.set_primary_active_tab_id(id.clone());
-                } else {
-                    ui.set_secondary_active_tab_id(id.clone());
-                }
+                push_models(&ui, &workspace.borrow());
                 ui.set_status(format!("Active tab in {group} group: {id}").into());
             }
         }
     });
     ui.on_tab_close_requested({
         let ui_weak = ui.as_weak();
-        let primary_tabs = primary_tabs.clone();
-        let secondary_tabs = secondary_tabs.clone();
-        let active_group = active_group.clone();
+        let workspace = workspace.clone();
         move |group: SharedString, id: SharedString| {
-            let next_active = {
-                let mut tabs = if group == "primary" {
-                    primary_tabs.borrow_mut()
-                } else {
-                    secondary_tabs.borrow_mut()
-                };
-                let Some(index) = tabs.iter().position(|tab| tab.id == id) else {
-                    return;
-                };
-                tabs.remove(index);
-                tabs.get(index)
-                    .or_else(|| index.checked_sub(1).and_then(|previous| tabs.get(previous)))
-                    .map(|tab| tab.id.clone())
-            };
+            if !workspace.borrow_mut().close(group.as_str(), id.as_str()) { return; }
             if let Some(ui) = ui_weak.upgrade() {
-                if group == "primary" {
-                    ui.set_primary_active_tab_id(next_active.clone().unwrap_or_default());
-                } else {
-                    ui.set_secondary_active_tab_id(next_active.clone().unwrap_or_default());
-                }
-                if next_active.is_none() {
-                    *active_group.borrow_mut() = String::from("primary");
-                }
-                let primary = primary_tabs.borrow();
-                let secondary = secondary_tabs.borrow();
-                push_models(&ui, &primary, &secondary);
+                push_models(&ui, &workspace.borrow());
                 ui.set_status(format!("Closed tab {id} in {group} group").into());
             }
         }
     });
     ui.on_split_right_requested({
         let ui_weak = ui.as_weak();
-        let primary_tabs = primary_tabs.clone();
-        let secondary_tabs = secondary_tabs.clone();
-        let active_group = active_group.clone();
+        let workspace = workspace.clone();
         move || {
-            let mut primary = primary_tabs.borrow_mut();
-            let mut secondary = secondary_tabs.borrow_mut();
-            if secondary.is_empty() {
-                if let Some(tab) = primary.pop() {
-                    let active = tab.id.clone();
-                    secondary.push(tab);
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_secondary_active_tab_id(active);
-                    }
-                    *active_group.borrow_mut() = String::from("secondary");
-                }
+            let mut state = workspace.borrow_mut();
+            if state.group("secondary").is_some_and(|group| group.tabs().is_empty()) {
+                // Explorer's content is currently mounted in the primary slot.
+                // Other document IDs can safely move to the second demo pane.
+                let candidate = state.group("primary").and_then(|group| group.tabs().iter()
+                    .rev().find(|tab| tab.id != "explorer" && tab.enabled).map(|tab| tab.id.clone()));
+                if let Some(id) = candidate { state.move_tab("primary", "secondary", &id); }
             }
             if let Some(ui) = ui_weak.upgrade() {
-                push_models(&ui, &primary, &secondary);
+                push_models(&ui, &state);
                 ui.set_split_enabled(true);
                 ui.set_status("Created a second document group; drag the divider to resize it.".into());
             }
@@ -348,59 +396,29 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     ui.on_new_tab_requested({
         let ui_weak = ui.as_weak();
-        let primary_tabs = primary_tabs.clone();
-        let secondary_tabs = secondary_tabs.clone();
-        let active_group = active_group.clone();
+        let workspace = workspace.clone();
         let next_tab_number = next_tab_number.clone();
         move |title: SharedString| {
             let title = title.trim().to_owned();
+            let Some(ui) = ui_weak.upgrade() else { return; };
             if title.is_empty() {
-                if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_status("Enter a title before creating a tab.".into());
-                }
+                ui.set_status("Enter a title before creating a tab.".into());
                 return;
             }
             let number = next_tab_number.get();
+            let id = format!("document-{number}");
+            let mut state = workspace.borrow_mut();
+            let target = state.active_group().to_owned();
+            let tab = ui_tabs::Tab { id, title: title.clone(), icon: None, icon_size: 16.,
+                text_color: None, closable: true, enabled: true };
+            if !state.add(&target, tab, true) {
+                ui.set_status("Could not create tab: duplicate ID or unknown group.".into());
+                return;
+            }
             next_tab_number.set(number + 1);
-            let id: SharedString = format!("document-{number}").into();
-            let target = active_group.borrow().clone();
-            if target == "secondary" {
-                secondary_tabs.borrow_mut().push(TabItem {
-                    id: id.clone(),
-                    title: title.clone().into(),
-                    icon: Image::default(),
-                    has_icon: false,
-                    icon_size: 16.,
-                    text_color: Color::from_argb_u8(0, 0, 0, 0),
-                    has_text_color: false,
-                    closable: true,
-                    enabled: true,
-                });
-            } else {
-                primary_tabs.borrow_mut().push(TabItem {
-                    id: id.clone(),
-                    title: title.clone().into(),
-                    icon: Image::default(),
-                    has_icon: false,
-                    icon_size: 16.,
-                    text_color: Color::from_argb_u8(0, 0, 0, 0),
-                    has_text_color: false,
-                    closable: true,
-                    enabled: true,
-                });
-            }
-            if let Some(ui) = ui_weak.upgrade() {
-                if target == "secondary" {
-                    ui.set_secondary_active_tab_id(id);
-                } else {
-                    ui.set_primary_active_tab_id(id);
-                }
-                let primary = primary_tabs.borrow();
-                let secondary = secondary_tabs.borrow();
-                push_models(&ui, &primary, &secondary);
-                ui.set_new_tab_title("".into());
-                ui.set_status(format!("Created tab {title} in {target} group").into());
-            }
+            push_models(&ui, &state);
+            ui.set_new_tab_title("".into());
+            ui.set_status(format!("Created tab {title} in {target} group").into());
         }
     });
     ui.on_split_ratio_changed({
@@ -430,4 +448,30 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.show()?;
     window_control.after_show(&ui.window());
     ui.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExplorerSelection;
+
+    #[test]
+    fn selection_modes_follow_display_order_and_preserve_anchor() {
+        let rows = ["a", "b", "c", "d"].map(String::from);
+        let mut selection = ExplorerSelection::default();
+        selection.request("b".into(), 0, &rows);
+        selection.request("d".into(), 2, &rows);
+        assert_eq!(selection.ids.len(), 3);
+        assert!(selection.ids.contains("b") && selection.ids.contains("c") && selection.ids.contains("d"));
+        assert_eq!(selection.anchor_id, "b");
+        selection.request("a".into(), 1, &rows);
+        assert!(selection.ids.contains("a"));
+        assert_eq!(selection.anchor_id, "a");
+        selection.request("c".into(), 2, &rows);
+        assert_eq!(selection.ids.len(), 3);
+        assert!(!selection.ids.contains("d"));
+        selection.request("b".into(), 1, &rows);
+        assert!(!selection.ids.contains("b"));
+        selection.clear();
+        assert!(selection.ids.is_empty() && selection.focused_id.is_empty() && selection.anchor_id.is_empty());
+    }
 }

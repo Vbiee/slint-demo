@@ -4,6 +4,15 @@
 //! resize border, rounded corners and drop shadow.  `WM_NCCALCSIZE` only moves
 //! the client area upward over the normal caption, and `WM_NCHITTEST` restores
 //! resize/drag behaviour where Slint cannot express it.
+//!
+//! Required: Windows, `slint` with `unstable-winit-030`, and `windows-sys`
+//! Win32 features for Foundation, Graphics DWM/GDI, UI Controls and WindowsAndMessaging.
+//! Standalone low-level bridge; `ui_slint_win32_control.rs` and a Slint topbar
+//! are optional. Select the alpha backend before creating any Slint window;
+//! `install` registers deferred native hooks, `install_now` returns false if no
+//! native handle is ready. `FrameConfig` dimensions are physical pixels and
+//! `border_color` is Win32 COLORREF. `set_corner_radius` and
+//! `set_custom_frame_client_size` apply window-specific native settings.
 
 use slint::winit_030::{
     winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -39,11 +48,17 @@ use windows_sys::Win32::{
 /// Values are physical pixels because Win32 sends physical pointer coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct FrameConfig {
+    /// Resize hit-target thickness at the left edge, physical pixels.
     pub resize_left: i32,
+    /// Resize hit-target thickness at the top edge, physical pixels.
     pub resize_top: i32,
+    /// Resize hit-target thickness at the right edge, physical pixels.
     pub resize_right: i32,
+    /// Resize hit-target thickness at the bottom edge, physical pixels.
     pub resize_bottom: i32,
+    /// Drag-hit region height from top of client area, physical pixels.
     pub title_bar_height: i32,
+    /// Right-side width excluded from drag hit testing for caption buttons.
     pub caption_button_width: i32,
     /// `COLORREF` (`0x00bbggrr`), or `None` to use Windows' default border.
     pub border_color: Option<u32>,

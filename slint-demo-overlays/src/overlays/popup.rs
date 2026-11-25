@@ -1,4 +1,13 @@
 //! Owns a standalone Slint `Window`, so callers never embed popup UI in their layout.
+//!
+//! Required: generated `crate::DetachedPopup` from `ui/detached_popup.slint`,
+//! `ui/ui_top_bar.slint`, Slint winit feature and Win32 APIs. The module also
+//! references `crate::ui_slint_win32_frame` at compile time, even when choosing
+//! `FrameStyle::Native`. `new` constructs the window and binds its callbacks;
+//! `show(title, message)` displays it and can return a platform error.
+//! The manager hides the window on Accepted/Dismissed and emits that event;
+//! host owns business actions. `set_topbar` configures visible controls/size;
+//! `restore_focus_and_flash` is a Windows focus request, not a guarantee.
 
 use crate::DetachedPopup;
 use slint::{
@@ -15,12 +24,15 @@ use windows_sys::Win32::{
 
 #[derive(Clone, Copy, Debug)]
 pub enum FrameStyle {
+    /// Use platform-provided native window frame.
     Native,
+    /// Use custom Win32 frame and caller-supplied physical-pixel hit geometry.
     CustomWin32(crate::ui_slint_win32_frame::FrameConfig),
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct PopupOptions {
+    /// Select native or custom frame; default is Native.
     pub frame: FrameStyle,
     /// Used only by `CustomWin32`; zero preserves the DWM shadow seam.
     pub corner_radius: f32,
@@ -34,7 +46,9 @@ impl Default for PopupOptions {
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// User accepted; manager has hidden the popup.
     Accepted,
+    /// User dismissed; manager has hidden the popup.
     Dismissed,
 }
 
@@ -44,6 +58,8 @@ pub struct PopupWindowManager {
     custom_corner_radius: Option<f32>,
 }
 
+/// Button visibility flags and bar height/title font size in logical pixels.
+/// For CustomWin32, host must separately keep FrameConfig geometry in sync.
 pub struct TopBarConfig { pub show_minimize: bool, pub show_maximize: bool, pub show_close: bool, pub height: f32, pub title_size: f32 }
 
 impl PopupWindowManager {

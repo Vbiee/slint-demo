@@ -1,12 +1,28 @@
 //! Window-chrome manager shared by any Slint window that opts into the
 //! Win32 custom client frame. UI components such as `UiTopBar` only emit
 //! callbacks; the host routes those callbacks to these window operations.
+//!
+//! # Host contract
+//! - Dependency: `crate::ui_slint_win32_frame`, Slint winit backend/feature,
+//!   and the Win32 dependencies used by that bridge. Windows-specific code.
+//! - Before creating any Slint window: call `select_backend()` and handle its
+//!   `Result`. Construct `UiSlintWin32Control::new(Options { frame, corner_radius })`.
+//! - Configure `FrameConfig` resize edges, title-bar height and caption-button
+//!   exclusion to match the actual window UI; those geometry fields are physical
+//!   pixels. `border_color` is optional Win32 COLORREF. Defaults are in the bridge.
+//! - Call `install(window)` before show and `after_show(window)` after show;
+//!   call `after_show` again after subsequent shows when needed.
+//! - Route UI actions to `minimize`, `toggle_maximized` and `set_corner_radius`;
+//!   the host handles close. The manager neither owns a window nor handles its
+//!   application state. `set_corner_radius` clamps negative values to zero.
 
 use crate::ui_slint_win32_frame::{self, FrameConfig};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    /// Win32 hit-test geometry and optional border color.
     pub frame: FrameConfig,
+    /// Window corner radius; zero preserves the DWM shadow seam.
     pub corner_radius: f32,
 }
 

@@ -1,4 +1,16 @@
-//! Caller-facing adapter for a detached native context-menu window.
+//! Caller-facing in-app / detached context-menu manager.
+//!
+//! Required: `slint` with `unstable-winit-030`, Windows APIs/features used
+//! below, generated `crate::ContextMenuItem` and `crate::DetachedContextMenu`
+//! from `ui_context_menu.slint` + `ui_context_menu_native.slint`, and a host
+//! `ContextMenuPort` implementation. This manager constructs the native window
+//! even for in-app use; it is not a platform-neutral Slint-only adapter.
+//! `ContextMenuManager::new(port, options, on_event)` binds callbacks;
+//! `show(use_native, x, y, items)` takes host-relative logical coordinates,
+//! converts to screen coordinates through the port for native display, and
+//! returns platform errors. Caller interprets ItemTriggered/Dismissed. In-app
+//! replacement currently reuses prior items; context-sensitive content requires
+//! a host `show` call. Rust `Item` has no icon field; Slint model supports icons.
 
 use crate::{ContextMenuItem, DetachedContextMenu};
 use slint::{
@@ -19,12 +31,19 @@ use windows_sys::Win32::{
 
 #[derive(Clone, Default)]
 pub struct Item {
+    /// Caller-defined identifier delivered in ItemTriggered.
     pub id: String,
+    /// Entry label shown in the menu.
     pub label: String,
+    /// Display-only shortcut text; caller implements keyboard shortcuts.
     pub shortcut: String,
+    /// Whether entry can be triggered; Default is false.
     pub enabled: bool,
+    /// Display a check mark.
     pub checked: bool,
+    /// Use the theme's danger text color unless overridden.
     pub danger: bool,
+    /// Render as a noninteractive separator instead of an entry.
     pub separator: bool,
     /// If present, takes precedence over the theme's normal, danger, and
     /// disabled text colors for this entire row (label, shortcut, checkmark).
@@ -42,13 +61,21 @@ pub enum Event {
 /// implement this at their boundary; the menu module never needs to know a
 /// product's layout or business commands.
 pub trait ContextMenuPort: Clone + 'static {
+    /// Publish converted items to the in-app menu.
     fn set_context_menu_items(&self, items: ModelRc<ContextMenuItem>);
+    /// Set in-app menu anchor in host logical coordinates.
     fn set_context_menu_anchor(&self, x: f32, y: f32);
+    /// Control in-app menu visibility.
     fn set_context_menu_open(&self, open: bool);
+    /// Forward the in-app item ID callback.
     fn on_context_menu_item_triggered(&self, callback: impl Fn(String) + 'static);
+    /// Forward dismissal from the in-app view.
     fn on_context_menu_dismissed(&self, callback: impl Fn() + 'static);
+    /// Forward right-click outside the currently open menu.
     fn on_context_menu_replacement_requested(&self, callback: impl Fn(f32, f32) + 'static);
+    /// Convert host logical position to physical screen coordinates.
     fn context_menu_screen_position(&self, x: f32, y: f32) -> PhysicalPosition;
+    /// Report whether a physical screen point is within the host window.
     fn context_menu_contains_screen_position(&self, position: PhysicalPosition) -> bool;
 }
 
@@ -146,24 +173,43 @@ fn transparent_color() -> Color {
 /// to use the current default theme.
 #[derive(Clone, Debug)]
 pub struct ContextMenuStyle {
+    /// Menu width in logical pixels.
     pub menu_width: f32,
+    /// Maximum visible menu height in logical pixels.
     pub menu_max_height: f32,
+    /// Padding around menu entries in logical pixels.
     pub menu_padding: f32,
+    /// Vertical spacing between entries in logical pixels.
     pub entry_spacing: f32,
+    /// Outer border width in logical pixels.
     pub menu_border_width: f32,
+    /// Menu body fill color.
     pub menu_background: Color,
+    /// Outer menu border color.
     pub menu_border_color: Color,
+    /// Menu corner radius in logical pixels; positive uses rounded presentation.
     pub corner_radius: f32,
+    /// Height of a regular menu entry in logical pixels.
     pub entry_height: f32,
+    /// Entry background corner radius in logical pixels.
     pub entry_corner_radius: f32,
+    /// Left inset for row contents in logical pixels.
     pub entry_text_left_padding: f32,
+    /// Entry border width in logical pixels.
     pub entry_border_width: f32,
+    /// Normal entry fill.
     pub entry_background: Color,
+    /// Entry border color.
     pub entry_border_color: Color,
+    /// Default hovered enabled entry fill.
     pub entry_hover_background: Color,
+    /// Default enabled entry text color.
     pub entry_text_color: Color,
+    /// Default shortcut text color.
     pub entry_shortcut_color: Color,
+    /// Disabled entry text color.
     pub entry_disabled_text_color: Color,
+    /// Danger entry text color.
     pub entry_danger_text_color: Color,
 }
 
@@ -196,6 +242,7 @@ impl Default for ContextMenuStyle {
 /// Presentation for the detached context menu.
 #[derive(Clone, Debug, Default)]
 pub struct ContextMenuOptions {
+    /// Visual configuration for the detached menu; use Default for built-in values.
     pub style: ContextMenuStyle,
 }
 

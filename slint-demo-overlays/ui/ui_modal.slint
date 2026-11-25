@@ -1,11 +1,24 @@
+// REQUIRED: Slint runtime; no other project module. Embed full-parent size.
+// INPUTS: open (false), title, message, confirm-label ("Confirm"),
+// cancel-label ("Cancel"). CALLBACKS: confirmed() and cancelled() (cancel
+// button or backdrop); host executes actions and updates open. Card size,
+// colors and layout are currently hard-coded. Optional Rust modal adapter in
+// src/overlays/modal.rs depends on this demo's generated AppWindow.
 // Generic modal: caller owns visibility, content strings, and action logic.
 export component UiModal inherits Rectangle {
+    // Host-owned visibility; callbacks do not change this value.
     in property <bool> open: false;
+    // Card heading text.
     in property <string> title;
+    // Card body text, word-wrapped.
     in property <string> message;
+    // Confirm button text.
     in property <string> confirm-label: "Confirm";
+    // Cancel button text.
     in property <string> cancel-label: "Cancel";
+    // User pressed confirm; host performs the action and closes if desired.
     callback confirmed();
+    // User pressed cancel or the scrim; host changes open if desired.
     callback cancelled();
 
     visible: root.open;

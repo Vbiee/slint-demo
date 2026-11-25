@@ -4,6 +4,13 @@
 //! resize border, rounded corners and drop shadow.  `WM_NCCALCSIZE` only moves
 //! the client area upward over the normal caption, and `WM_NCHITTEST` restores
 //! resize/drag behaviour where Slint cannot express it.
+//!
+//! Required: Windows, `slint` with `unstable-winit-030` and the `windows-sys`
+//! Win32 features used below. No project UI module is mandatory. Select the
+//! alpha backend before creating any Slint window; install registers a deferred
+//! window hook. FrameConfig uses physical-pixel hit-test geometry and optional
+//! Win32 COLORREF. The host supplies matching titlebar UI/actions; the separate
+//! `slint-demo-frame` version has a different multi-window implementation.
 
 use slint::winit_030::{
     winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -41,11 +48,17 @@ use windows_sys::Win32::{
 /// Values are physical pixels because Win32 sends physical pointer coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct FrameConfig {
+    /// Left resize hit-target thickness in physical pixels.
     pub resize_left: i32,
+    /// Top resize hit-target thickness in physical pixels.
     pub resize_top: i32,
+    /// Right resize hit-target thickness in physical pixels.
     pub resize_right: i32,
+    /// Bottom resize hit-target thickness in physical pixels.
     pub resize_bottom: i32,
+    /// Title-bar drag region height in physical pixels.
     pub title_bar_height: i32,
+    /// Right-side caption-button area excluded from drag hit testing.
     pub caption_button_width: i32,
     /// `COLORREF` (`0x00bbggrr`), or `None` to use Windows' default border.
     pub border_color: Option<u32>,

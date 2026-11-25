@@ -1,7 +1,20 @@
+// === Context menu contract ==================================================
+// REQUIRED: Slint runtime. UiContextMenu is standalone; detached presentation
+// additionally imports this file from ui_context_menu_native.slint. Optional:
+// Rust manager src/overlays/context_menu.rs (its own Win32/generated-type
+// dependencies apply). Caller owns items, visibility and action meanings.
+// UiContextMenu fills caller-assigned bounds; open/anchor-x/y/items are inputs.
+// item-triggered(id), dismissed() and replacement-requested(x,y) are requests;
+// caller closes/reopens or replaces the model and handles coordinates. Surface
+// renders the common body, reports intrinsic-height, and emits item-triggered.
+// Geometry, color and entry properties with defaults are declared on each view.
 // Data-only contract. The caller assigns meaning to `id`; menu visuals only
 // render choices and report primitive menu events.
 export struct ContextMenuItem {
+    // Caller-defined action ID, label, shortcut display text and optional image.
     id: string, label: string, shortcut: string, icon: image, has-icon: bool,
+    // enabled gates click; checked shows a mark; danger changes default color;
+    // separator renders a noninteractive divider instead of an entry.
     enabled: bool, checked: bool, danger: bool, separator: bool,
     // Optional per-entry presentation overrides. When either `has-*` flag
     // is false, the shared menu theme supplies that value instead.
@@ -13,31 +26,57 @@ export struct ContextMenuItem {
 // It owns every detail that affects intrinsic height, ensuring the two hosts
 // cannot drift apart in row geometry, scrolling, or colors.
 export component ContextMenuSurface inherits Rectangle {
+    // Ordered caller-owned entries and separators.
     in property <[ContextMenuItem]> items;
+    // Inset around menu entries.
     in property <length> menu-padding: 6px;
+    // Vertical spacing between entries.
     in property <length> entry-spacing: 2px;
+    // Outer menu border thickness.
     in property <length> menu-border-width: 1px;
+    // Outer menu corner radius.
     in property <length> corner-radius: 0px;
+    // Menu background fill.
     in property <color> menu-background: #2a313d;
+    // Outer border color.
     in property <color> menu-border-color: #4a576b;
+    // Height of a normal menu row.
     in property <length> entry-height: 32px;
+    // Row background corner radius.
     in property <length> entry-corner-radius: 4px;
+    // Left inset for row contents.
     in property <length> entry-text-left-padding: 10px;
+    // Right inset for row contents.
     in property <length> entry-text-right-padding: 10px;
+    // Square icon or checkmark allocation.
     in property <length> icon-size: 16px;
+    // Gap following a visible icon or checkmark.
     in property <length> icon-text-gap: 8px;
+    // Width reserved for nonempty shortcut text.
     in property <length> shortcut-width: 74px;
+    // Height of separator row.
     in property <length> separator-height: 1px;
+    // Horizontal inset of separator line.
     in property <length> separator-inset: 8px;
+    // Thickness of row borders.
     in property <length> entry-border-width: 0px;
+    // Normal row background.
     in property <color> entry-background: transparent;
+    // Row border color.
     in property <color> entry-border-color: transparent;
+    // Default hovered enabled row fill.
     in property <color> entry-hover-background: #3b4d64;
+    // Normal enabled row text color.
     in property <color> entry-text-color: #e7edf6;
+    // Default shortcut text color.
     in property <color> entry-shortcut-color: #9eabba;
+    // Disabled row text color.
     in property <color> entry-disabled-text-color: #6e7888;
+    // Danger row text color.
     in property <color> entry-danger-text-color: #ff9a9a;
+    // Separator line color.
     in property <color> separator-color: #4a576b;
+    // Preferred height of all rows including padding and spacing.
     out property <length> intrinsic-height: items-layout.preferred-height;
     callback item-triggered(string);
 
@@ -132,12 +171,18 @@ export component ContextMenuSurface inherits Rectangle {
 // In-app presentation: only owns the full-parent dismiss area and clamps the
 // shared surface to the caller's bounds.
 export component UiContextMenu inherits Rectangle {
+    // Show the in-app overlay when true.
     in property <bool> open: false;
+    // Menu anchor x relative to overlay bounds.
     in property <length> anchor-x: 0px;
+    // Menu anchor y relative to overlay bounds.
     in property <length> anchor-y: 0px;
     in property <[ContextMenuItem]> items;
+    // Preferred menu width, limited by viewport.
     in property <length> menu-width: 204px;
+    // Maximum visible menu height before scrolling.
     in property <length> menu-max-height: 320px;
+    // Minimum gap between menu and overlay edges.
     in property <length> viewport-margin: 8px;
     in property <length> menu-padding: 6px;
     in property <length> entry-spacing: 2px;

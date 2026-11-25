@@ -1,3 +1,10 @@
+// REQUIRED: ui_context_menu.slint for the item model and shared surface.
+// This is a separate Window: caller creates, positions, shows/hides it and
+// handles item-triggered(id). items and visual properties are in-out;
+// use-native-frame selects window frame; rounded transparent windows depend on
+// backend/platform support. intrinsic-height is the full content height;
+// bounded-intrinsic-height is capped by menu-max-height. Optional Windows
+// lifecycle/position management is in src/overlays/context_menu.rs.
 import { ContextMenuItem, ContextMenuSurface } from "ui_context_menu.slint";
 
 // Native presentation: Window lifecycle/positioning is the only difference
@@ -20,10 +27,15 @@ export component DetachedContextMenu inherits Window {
     // reveal the desktop instead of an opaque square Window background.
     background: root.corner-radius > 0px ? transparent : root.menu-background;
 
+    // Ordered menu rows shared with the in-app presentation.
     in-out property <[ContextMenuItem]> items;
+    // Enable the native frame; false uses a frameless window.
     in-out property <bool> use-native-frame: true;
+    // Shared surface corner radius; positive radius requires transparent corners.
     in-out property <length> corner-radius: 0px;
+    // Width of the detached menu window.
     in-out property <length> menu-width: 204px;
+    // Maximum visible window height.
     in-out property <length> menu-max-height: 320px;
     in-out property <length> menu-padding: 6px;
     in-out property <length> entry-spacing: 2px;
@@ -48,7 +60,9 @@ export component DetachedContextMenu inherits Window {
     in-out property <color> entry-disabled-text-color: #6e7888;
     in-out property <color> entry-danger-text-color: #ff9a9a;
     in-out property <color> separator-color: #4a576b;
+    // Full preferred height of the shared menu content.
     out property <length> intrinsic-height: surface.intrinsic-height;
+    // Content height capped by menu-max-height.
     out property <length> bounded-intrinsic-height: min(root.menu-max-height, root.intrinsic-height);
     callback item-triggered(string);
 

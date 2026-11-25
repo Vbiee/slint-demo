@@ -1,40 +1,100 @@
+// === UiList contract ========================================================
+// DEPENDENCY: ui_scroll_view.slint (ListView). Rust helper: src/ui_list.rs.
+// HOST OWNS: bounded component size, data/models, selected IDs, focus, anchor,
+// application commands and icons. UiList renders and emits requests only.
+//
+// DATA INPUTS
+// - columns: [ListColumn], stable unique id, title, width (negative = stretch),
+//   min-width, alignment (0 left, 1 center, 2 right), resizable. Header/cell
+//   text and background colors each have a corresponding has-* flag.
+// - rows: [ListRow], stable unique id, selected, and cells in column order.
+//   Extra cells are ignored; missing cells are empty. ListCell has text, icon,
+//   has-icon, icon-size, text/background colors and their has-* flags. Cell
+//   colors override column colors; text then falls back to selection/hover/theme.
+// - focused-id: caller's focused row; its border appears while list has focus.
+//   Update rows[].selected and focused-id in response to requests; neither is
+//   maintained by UiList. keyboard-page-size defaults to 10 rows.
+//
+// INPUT/OUTPUT: content-x, content-y are scroll offsets (negative when scrolled
+// right/down). Bind them only if the caller needs to observe/restore scroll.
+//
+// CALLBACKS (host must connect the features it wants)
+// - selection-requested(id, mode): 0 replace/reset anchor, 1 toggle, 2 extend
+//   from the host's anchor. Host computes the selection and republishes rows.
+// - focus-requested(id): update focused-id; does not itself select a row.
+// - activated(id): double-click or Enter; host decides the action.
+// - context-menu-requested(id, x, y): right mouse down; coordinates are relative
+//   to the window. Host decides selection policy and opens the menu.
+// - command-requested(code): 1 rename/F2, 2 delete, 3 copy/Ctrl+C,
+//   4 cut/Ctrl+X, 5 paste/Ctrl+V, 6 select all/Ctrl+A, 7 clear/Escape.
+// - column-resized(id, width): committed on release; persist width in columns.
+// - selected(id): exposed for compatibility, but not emitted by this component.
+//
+// OPTIONAL INPUTS: header-height 32px, row-height 34px, row-gap 2px,
+// row-corner-radius 4px, horizontal-padding/field-horizontal-padding 6px,
+// icon-text-gap 6px, corner-radius 0px; color properties are declared below.
+// status-visible defaults false; status-at-top false; status-height 26px.
+// @children is the status content, owned and laid out by the caller.
+//
+// BEHAVIOR/LIMITS: rows use a virtualized ListView. Arrow/Home/End/Page keys
+// request focus and selection; Ctrl+arrow requests focus only. Plain drag emits
+// range requests; Ctrl+drag currently acts as Ctrl+click, not additive drag.
+// The red outer debug border is currently hard-coded. Rust Port implementations
+// must forward callbacks: a no-op adapter method silently discards that feature.
 import { ListView } from "ui_scroll_view.slint";
 
 // Generic table schema. width: -1px means this column shares remaining space
 // with other auto-width columns; alignment: 0 = left, 1 = center, 2 = right.
 export struct ListColumn {
+    // Stable ID for column resize events; unique within columns.
     id: string,
+    // Header text.
     title: string,
+    // Nonnegative fixed logical width; any negative value enables stretch.
     width: length,
+    // Minimum drag width and starting width for a stretched column.
     min-width: length,
+    // Header and cell alignment: 0 left, 1 center, 2 right.
     alignment: int,
+    // Show resize handle and emit column-resized on release.
     resizable: bool,
+    // Cell text default and enable flag; a cell override has priority.
     text-color: color,
     has-text-color: bool,
+    // Cell fill default and enable flag; a cell override has priority.
     background-color: color,
     has-background-color: bool,
+    // Header text override and enable flag.
     header-text-color: color,
     has-header-text-color: bool,
+    // Header fill override and enable flag.
     header-background-color: color,
     has-header-background-color: bool,
 }
 
 export struct ListCell {
+    // Cell text; model index corresponds to the column index.
     text: string,
     // An optional caller-owned image. UiList only lays it out; it never loads
     // icons or infers them from the text/row.
     icon: image,
+    // Show icon only when true; icon-size is its square logical size.
     has-icon: bool,
     icon-size: length,
+    // Per-cell text override and enable flag.
     text-color: color,
     has-text-color: bool,
+    // Per-cell background override and enable flag.
     background-color: color,
     has-background-color: bool,
 }
 
 export struct ListRow {
+    // Stable ID returned by interaction callbacks.
     id: string,
+    // Ordered to match columns; absent cells are empty, extra cells ignored.
     cells: [ListCell],
+    // Caller-owned selection flag used for row styling.
     selected: bool,
 }
 
@@ -46,6 +106,7 @@ component HeaderColumn inherits Rectangle {
     // list prevents a host model update from recreating this delegate mid-drag.
     in property <length> effective-width;
     in property <bool> effective-auto-stretch;
+    // Horizontal inset within each field.
     in property <length> field-horizontal-padding;
     callback resize-preview(string, length);
     callback resize-committed(string, length);
@@ -132,36 +193,60 @@ component HeaderColumn inherits Rectangle {
 // Generic, virtualized data list. The caller owns schema and row data; this
 // component only renders it and emits semantic selection/resize events.
 export component UiList inherits Rectangle {
+    // Ordered caller-owned column schema.
     in property <[ListColumn]> columns;
+    // Ordered caller-owned row model including selected flags.
     in property <[ListRow]> rows;
+    // Height of the column header.
     in property <length> header-height: 32px;
+    // Visible row height, excluding row-gap.
     in property <length> row-height: 34px;
+    // Spacing reserved around each row.
     in property <length> row-gap: 2px;
+    // Radius of selection/hover row fill.
     in property <length> row-corner-radius: 4px;
     // Outer space belongs to the whole table; every field gets its own
     // symmetric inset so adjacent columns do not render flush to each other.
+    // Horizontal inset around the entire row/header layout.
     in property <length> horizontal-padding: 6px;
     in property <length> field-horizontal-padding: 6px;
+    // Background of the header strip.
     in property <color> header-background-color: #252b36;
+    // Default column header text color.
     in property <color> header-text-color: #b8c2d1;
+    // Default normal cell text color.
     in property <color> row-text-color: #d9e0ea;
+    // Hovered unselected row fill.
     in property <color> hover-row-color: #273443;
+    // Fallback text color for hovered unselected rows.
     in property <color> hover-text-color: #f0f4fa;
+    // Focused row border color while list has keyboard focus.
     in property <color> focused-row-border-color: #8ab4f8;
+    // Selected row fill.
     in property <color> selected-row-color: #304c70;
+    // Fallback text color of selected rows.
     in property <color> selected-text-color: #f4f7fb;
+    // Gap between a cell's icon and text.
     in property <length> icon-text-gap: 6px;
     // The default component slot is the status area. The caller owns every
     // visual inside it; UiList only reserves and positions that area.
+    // Reserve and display caller's status slot.
     in property <bool> status-visible: false;
+    // True places status above header; false places it below rows.
     in property <bool> status-at-top: false;
+    // Height reserved for visible status.
     in property <length> status-height: 26px;
+    // Outer border/clip corner radius.
     in property <length> corner-radius: 0px;
     // Caller-owned selection state. Modes emitted below: 0 replace, 1 toggle,
     // 2 extend from the caller's selection anchor.
+    // Caller-owned focused row ID.
     in property <string> focused-id: "";
+    // Number of rows to move with PageUp/PageDown.
     in property <int> keyboard-page-size: 10;
+    // Read/write horizontal scroll offset; negative when scrolled right.
     in-out property <length> content-x: 0px;
+    // Read/write vertical scroll offset; negative when scrolled down.
     in-out property <length> content-y: 0px;
     // Resizing is a purely local preview.  The host receives one committed
     // width only after the pointer is released.

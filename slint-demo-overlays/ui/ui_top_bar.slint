@@ -1,38 +1,80 @@
+// === UiTopBar contract ======================================================
+// HOST: provide width and handle window behavior; this component paints a bar.
+// INPUTS: title, logo (text), logo-color/size, title-color/size/font-family,
+// bar-height (46px), bar-background and content padding/spacing. Buttons have
+// configurable colors, widths, height, corner radius, icon text/size and
+// minimize/maximize/close tooltip text; defaults are declared below.
+// VISIBILITY: show-minimize, show-maximize and show-close default to false.
+// CALLBACKS: minimize-requested(), maximize-requested(), close-requested();
+// host wires each enabled action. There is no automatic window manipulation.
+// SLOT/OUTPUTS: none. For Win32 custom chrome the host also configures drag and
+// resize hit testing; match its title-bar height and caption-button exclusion.
 // Reusable client-side title bar. The caller owns all native window actions.
 export component UiTopBar inherits Rectangle {
+    // Title text supplied by caller.
     in property <string> title: "Application";
+    // Logo text glyph, not an image.
     in property <string> logo: "◆";
+    // Logo glyph color.
     in property <color> logo-color: #72b7ff;
+    // Logo glyph font size.
     in property <length> logo-size: 16px;
+    // Title text color.
     in property <color> title-color: #dce6f4;
+    // Title font size.
     in property <length> title-size: 14px;
+    // Title font family; empty uses default.
     in property <string> title-font-family: "";
+    // Height of the bar.
     in property <length> bar-height: 46px;
+    // Bar background fill.
     in property <color> bar-background: #202733;
+    // Left content inset.
     in property <length> content-left-padding: 18px;
+    // Right content inset.
     in property <length> content-right-padding: 6px;
+    // Gap between bar items.
     in property <length> content-spacing: 8px;
 
+    // Idle minimize/maximize button fill.
     in property <color> button-color: #303947;
+    // Hovered minimize/maximize button fill.
     in property <color> button-hover-color: #3c4758;
+    // Idle close button fill.
     in property <color> close-button-color: #303947;
+    // Hovered close button fill.
     in property <color> close-hover-color: #b53b4a;
+    // Color of button glyphs.
     in property <color> button-icon-color: #e2e8f0;
+    // Width of minimize/maximize buttons.
     in property <length> button-width: 38px;
+    // Width of close button.
     in property <length> close-button-width: 42px;
+    // Action button height.
     in property <length> button-height: 34px;
+    // Action button background radius.
     in property <length> button-corner-radius: 5px;
+    // Action glyph font size.
     in property <length> button-icon-size: 18px;
+    // Text glyph for minimize action.
     in property <string> minimize-icon: "−";
+    // Text glyph for maximize action.
     in property <string> maximize-icon: "□";
+    // Text glyph for close action.
     in property <string> close-icon: "×";
+    // Tooltip text for minimize.
     in property <string> minimize-tooltip: "";
+    // Tooltip text for maximize.
     in property <string> maximize-tooltip: "";
+    // Tooltip text for close.
     in property <string> close-tooltip: "";
 
     // Opt in: a compact popup should not expose actions it does not support.
+    // Show minimize button when true.
     in property <bool> show-minimize: false;
+    // Show maximize button when true.
     in property <bool> show-maximize: false;
+    // Show close button when true.
     in property <bool> show-close: false;
     callback minimize-requested();
     callback maximize-requested();

@@ -1,3 +1,8 @@
+// REQUIRED: ui_top_bar.slint and Slint Window support. The host owns lifecycle
+// and supplies title-text, message, topbar-show-*, topbar-height/title-size.
+// Handle accepted(), dismissed(), minimize-requested(), maximize-requested();
+// this component does not itself hide or run application actions. Optional
+// Windows-specific manager: src/overlays/popup.rs with generated DetachedPopup.
 // A real top-level Slint window. It is deliberately not embedded in AppWindow.
 import { UiTopBar } from "ui_top_bar.slint";
 export component DetachedPopup inherits Window {
@@ -8,13 +13,19 @@ export component DetachedPopup inherits Window {
     min-height: 190px;
     background: #202733;
 
+    // Text in the custom title bar; the native Window title is separate.
     in-out property <string> title-text: "Detached popup";
+    // Popup body text supplied by the host.
     in-out property <string> message: "This is a separate native window managed by PopupWindowManager.";
+    // Independently control the three topbar buttons.
     in-out property <bool> topbar-show-minimize: false;
     in-out property <bool> topbar-show-maximize: false;
     in-out property <bool> topbar-show-close: true;
+    // Visual bar height; native custom-frame geometry must be configured to match.
     in-out property <length> topbar-height: 46px;
+    // Font size for the title-bar text.
     in-out property <length> topbar-title-size: 14px;
+    // Host handles these actions and window visibility.
     callback accepted();
     callback dismissed();
     callback minimize-requested();

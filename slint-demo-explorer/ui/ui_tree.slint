@@ -1,63 +1,119 @@
+// === UiTree contract ========================================================
+// DEPENDENCY: ui_scroll_view.slint. Optional Rust helper: src/ui_tree.rs.
+// HOST OWNS: bounded size, hierarchy, loaded icons, selection and navigation.
+// INPUT nodes: flattened ordered [TreeNode]; id, label, depth, expanded,
+// selected and icon are caller-provided. A nonempty section labels that node's
+// section. Host decides which children are included and updates this model.
+// CALLBACKS: selected(id) on click; expansion-toggled(id) on expander click;
+// activated(id) on double-click. Wire required events and update the model;
+// this component never fetches children, changes selection or navigates itself.
+// OPTIONS: content-min-width 320px, content-padding 6px, section-height 24px,
+// row-height 30px, indent-width 16px, icon-size 18px. Other row, font, color
+// and scrollbar properties and their defaults are declared on UiTree below.
+// LIMITS: every node reserves expander and icon space; list is not virtualized.
+// Rust Port methods must forward the callbacks the host requires.
 import { UiScrollView } from "ui_scroll_view.slint";
 
 // Data-only navigation tree. The caller owns the hierarchy and navigation.
 export struct TreeNode {
     // Non-empty only on the first item of a section.
     section: string,
+    // Stable caller-defined ID emitted by callbacks.
     id: string,
+    // Node text; caller supplies the flattened display order.
     label: string,
+    // Indentation level multiplied by indent-width.
     depth: int,
+    // Chevron direction; caller controls which child rows are present.
     expanded: bool,
+    // Caller-owned selected styling flag.
     selected: bool,
     // Caller-owned image. UiTree neither loads nor infers an icon.
     icon: image,
 }
 
 export component UiTree inherits Rectangle {
+    // Caller-owned flattened node model in display order.
     in property <[TreeNode]> nodes;
 
     // Layout API
+    // Inset around scrollable node content.
     in property <length> content-padding: 6px;
     // The scroll content keeps at least this width. It gives long paths a
     // genuine horizontal overflow instead of shrinking every row to fit.
+    // Minimum scroll content width; overflow scrolls horizontally.
     in property <length> content-min-width: 320px;
+    // Spacing between nodes and section labels.
     in property <length> item-gap: 2px;
+    // Height of a section heading.
     in property <length> section-height: 24px;
+    // Font size for section headings.
     in property <length> section-font-size: 10px;
+    // Font weight for section headings.
     in property <int> section-font-weight: 600;
+    // Height of each node row.
     in property <length> row-height: 30px;
+    // Base horizontal inset inside a row.
     in property <length> row-horizontal-padding: 6px;
+    // Gap between expander, icon and label.
     in property <length> row-gap: 4px;
+    // Corner radius of row fill.
     in property <length> row-corner-radius: 4px;
+    // Font size for node labels.
     in property <length> row-font-size: 14px;
+    // Font weight for node labels.
     in property <int> row-font-weight: 400;
+    // Additional left inset per depth level.
     in property <length> indent-width: 16px;
+    // Square size of expander area.
     in property <length> expander-size: 16px;
+    // Corner radius of expander background.
     in property <length> expander-corner-radius: 3px;
+    // Chevron line thickness.
     in property <length> expander-stroke-width: 2px;
+    // Square icon slot reserved for each node.
     in property <length> icon-size: 18px;
 
     // Color API
+    // Background of the tree viewport.
     in property <color> tree-background-color: #1d2129;
+    // Tree border color.
     in property <color> tree-border-color: #303744;
+    // Tree border thickness.
     in property <length> tree-border-width: 1px;
+    // Section heading text color.
     in property <color> section-text-color: #7f8b9e;
+    // Normal row fill.
     in property <color> row-background-color: transparent;
+    // Hovered unselected row fill.
     in property <color> hover-row-color: #273443;
+    // Selected row fill.
     in property <color> selected-row-color: #304c70;
+    // Normal label text color.
     in property <color> row-text-color: #ccd4df;
+    // Exposed but currently not applied by the label renderer.
     in property <color> hover-text-color: #f0f4fa;
+    // Selected label text color.
     in property <color> selected-text-color: #f4f7fb;
+    // Expander fill.
     in property <color> expander-background-color: #303b4a;
+    // Chevron color.
     in property <color> expander-icon-color: #d4dce8;
 
     // Forwarded scrollbar theme API
+    // Drawn scrollbar thumb thickness.
     in property <length> scrollbar-thumb-width: 6px;
+    // Scrollbar pointer target thickness.
     in property <length> scrollbar-grab-width: 10px;
+    // Minimum scrollbar thumb length.
     in property <length> scrollbar-min-thumb-height: 24px;
+    // Distance between scrollbar and viewport edges.
     in property <length> scrollbar-inset: 3px;
+    // Scrollbar track fill.
     in property <color> scrollbar-track-color: #252b3440;
+    // Idle thumb fill.
     in property <color> scrollbar-thumb-color: #6b77884d;
+    // Hovered or dragged thumb fill.
     in property <color> scrollbar-thumb-hover-color: #8491a4;
 
     callback selected(string);

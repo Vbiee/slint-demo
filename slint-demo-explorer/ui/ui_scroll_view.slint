@@ -1,26 +1,52 @@
+// === UiScrollView / ListView contract =======================================
+// HOST: give the viewport bounded width/height and place measurable content in
+// @children. This module clips content and uses overlay scrollbars.
+// INPUTS: enabled (true: scrollbar interaction), horizontal-scrollbar-enabled
+// (true), thumb-width 6px, grab-width 10px, min-thumb-height 24px,
+// scrollbar-inset 3px, track-color, thumb-color and thumb-hover-color.
+// IN-OUT: content-x/y are Flickable offsets, negative when scrolled right/down.
+// OUTPUTS: content-width/height and visible-width/height report geometry.
+// CALLBACKS: none. ListView inherits this API and enables Slint's virtualized
+// direct-repeater usage. Mouse-drag panning of content is disabled; `enabled`
+// controls scrollbar hit areas, not all input to the child or Flickable.
 // Theme-owned two-axis scroll view. It deliberately does not use the Fluent
 // ScrollView widget, whose overlay scrollbar is controlled by the platform
 // style rather than this application's palette.
 export component UiScrollView inherits Rectangle {
+    // Enable scrollbar pointer interaction; child input remains independent.
     in property <bool> enabled: true;
+    // Show horizontal scrollbar when content overflows.
     in property <bool> horizontal-scrollbar-enabled: true;
     // Theme API. Callers may override any of these without copying the
     // scrolling and dragging implementation.
+    // Drawn scrollbar thickness.
     in property <length> thumb-width: 6px;
+    // Pointer hit-target thickness.
     in property <length> grab-width: 10px;
+    // Minimum thumb length on either axis.
     in property <length> min-thumb-height: 24px;
+    // Inset of scrollbars from viewport edges.
     in property <length> scrollbar-inset: 3px;
+    // Scrollbar track color.
     in property <color> track-color: #252b3440;
     // Idle thumb is intentionally subdued; hover/drag restores contrast.
+    // Idle thumb color.
     in property <color> thumb-color: #6b77884d;
+    // Hovered/dragged thumb color.
     in property <color> thumb-hover-color: #8491a4;
+    // Measured scrollable content height.
     out property <length> content-height <=> flickable.content-height;
+    // Read/write vertical content offset.
     in-out property <length> content-y <=> flickable.content-y;
+    // Measured scrollable content width.
     out property <length> content-width <=> flickable.content-width;
+    // Read/write horizontal content offset.
     in-out property <length> content-x <=> flickable.content-x;
     // These are also the contract Slint uses to virtualize a repeater hosted
     // by the ListView specialization below.
+    // Viewport height.
     out property <length> visible-height <=> flickable.height;
+    // Viewport width.
     out property <length> visible-width <=> flickable.width;
     property <length> vertical-maximum: max(0px, flickable.content-height - flickable.height);
     property <length> horizontal-maximum: max(0px, flickable.content-width - flickable.width);
