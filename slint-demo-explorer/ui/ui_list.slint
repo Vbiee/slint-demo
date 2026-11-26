@@ -355,9 +355,9 @@ export component UiList inherits Rectangle {
             else if (event.text == Key.F2) { root.command-requested(1); return accept; }
             else if (event.text == Key.Delete) { root.command-requested(2); return accept; }
             else if (event.modifiers.control && event.text == "a") { root.command-requested(6); return accept; }
-            else if (event.modifiers.control && event.text == "c") { root.command-requested(3); return accept; }
+            else if (event.modifiers.control && (event.text == "c" || event.text == "C")) { root.command-requested(3); return accept; }
             else if (event.modifiers.control && event.text == "x") { root.command-requested(4); return accept; }
-            else if (event.modifiers.control && event.text == "v") { root.command-requested(5); return accept; }
+            else if (event.modifiers.control && (event.text == "v" || event.text == "V")) { root.command-requested(5); return accept; }
             else if (event.text == Key.Escape) { root.command-requested(7); return accept; }
             else { return reject; }
             if (root.keyboard-index >= 0 && !event.modifiers.control) {

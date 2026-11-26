@@ -2,6 +2,8 @@
 //! application model: hosts decide which target accepts a point and what a
 //! dropped payload means. The Windows adapter currently supports filesystem
 //! paths; virtual Shell objects require a separate payload implementation.
+//! Required Windows sibling module: `ui_shell_data.rs` (also used by the
+//! optional `ui_clipboard.rs`); it supplies CF_HDROP/Shell conversion.
 //!
 //! Windows integration requires an OLE-initialized UI thread, a live HWND and
 //! a message loop. Only one target may be registered per HWND. The host must

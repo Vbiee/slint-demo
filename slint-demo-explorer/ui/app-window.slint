@@ -25,6 +25,8 @@ export component AppWindow inherits Window {
     callback tree-selected(string);
     callback tree-expansion-toggled(string);
     callback tree-activated(string);
+    callback tree-drag-start-requested(string);
+    callback tree-context-menu-requested(string, length, length);
     callback list-selected(string);
     callback list-selection-requested(string, int);
     callback list-drag-start-requested(string);
@@ -81,6 +83,8 @@ export component AppWindow inherits Window {
                         selected(id) => { root.tree-selected(id); }
                         expansion-toggled(id) => { root.tree-expansion-toggled(id); }
                         activated(id) => { root.tree-activated(id); }
+                        drag-start-requested(id) => { root.tree-drag-start-requested(id); }
+                        context-menu-requested(id, x, y) => { root.tree-context-menu-requested(id, x, y); }
                     }
                     list := UiList {
                         horizontal-stretch: 1;

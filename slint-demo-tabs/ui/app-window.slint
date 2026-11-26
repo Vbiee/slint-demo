@@ -32,6 +32,8 @@ export component AppWindow inherits Window {
     in-out property <bool> explorer-menu-open: false;
     in-out property <length> explorer-menu-x;
     in-out property <length> explorer-menu-y;
+    in-out property <bool> explorer-menu-is-tree: false;
+    in-out property <string> explorer-tree-menu-id;
     callback tab-selected(string, string);
     callback tab-close-requested(string, string);
     callback split-right-requested();
@@ -42,6 +44,9 @@ export component AppWindow inherits Window {
     callback explorer-tree-selected(string);
     callback explorer-tree-expansion-toggled(string);
     callback explorer-tree-activated(string);
+    callback explorer-tree-drag-start-requested(string);
+    callback explorer-tree-context-menu-requested(string, length, length);
+    callback explorer-tree-menu-open-requested(string);
     callback explorer-list-selected(string);
     callback explorer-list-selection-requested(string, int);
     callback explorer-list-drag-start-requested(string);
@@ -65,6 +70,14 @@ export component AppWindow inherits Window {
         return -1;
     }
 
+    public pure function explorer-tree-drop-hit(x: length, y: length) -> bool {
+        return root.primary-active-tab-id == "explorer"
+            && x >= primary-group.absolute-position.x + primary-group.content-x
+            && y >= primary-group.absolute-position.y + primary-group.content-y
+            && x < primary-group.absolute-position.x + primary-group.content-x + primary-group.content-width
+            && y < primary-group.absolute-position.y + primary-group.content-y + primary-group.content-height
+            && explorer-tree.drop-viewport-hit(x, y);
+    }
     Rectangle {
         background: #171b22;
         VerticalLayout {
@@ -148,6 +161,11 @@ export component AppWindow inherits Window {
                     tabs: root.primary-tabs;
                     active-id <=> root.primary-active-tab-id;
                     Rectangle {
+                        // Keep Explorer mounted so explorer-drop-hit can access
+                        // explorer-list: IDs inside an `if` cannot be accessed
+                        // from that root function. Unlike `if`, hiding this
+                        // component preserves its internal UI state and retains
+                        // its memory; hidden layout/data updates may still cost work.
                         visible: root.primary-active-tab-id == "explorer";
                         // It deliberately occupies the viewport it receives
                         // from the tab. UiTree and UiList keep their own
@@ -196,12 +214,14 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                UiTree {
+                                explorer-tree := UiTree {
                                     width: 240px;
                                     nodes: root.explorer-tree-nodes;
                                     selected(id) => { root.explorer-tree-selected(id); }
                                     expansion-toggled(id) => { root.explorer-tree-expansion-toggled(id); }
                                     activated(id) => { root.explorer-tree-activated(id); }
+                                    drag-start-requested(id) => { root.explorer-tree-drag-start-requested(id); }
+                                    context-menu-requested(id, x, y) => { root.explorer-tree-context-menu-requested(id, x, y); }
                                 }
                                 explorer-list := UiList {
                                     horizontal-stretch: 1;
@@ -285,7 +305,9 @@ export component AppWindow inherits Window {
             open: root.explorer-menu-open;
             anchor-x: root.explorer-menu-x;
             anchor-y: root.explorer-menu-y;
-            items: [
+            items: root.explorer-menu-is-tree ? [
+                { id: "tree-open", label: "Open folder", shortcut: "", enabled: true }
+            ] : [
                 { id: "6", label: "Select all", shortcut: "Ctrl+A", enabled: true },
                 { id: "7", label: "Clear selection", shortcut: "Esc", enabled: true },
                 { id: "1", label: "Rename (not implemented)", shortcut: "F2", enabled: false },
@@ -296,6 +318,7 @@ export component AppWindow inherits Window {
             ];
             item-triggered(id) => {
                 root.explorer-menu-open = false;
+                if (id == "tree-open") { root.explorer-tree-menu-open-requested(root.explorer-tree-menu-id); }
                 if (id == "6") { root.explorer-list-command-requested(6); }
                 if (id == "7") { root.explorer-list-command-requested(7); }
             }

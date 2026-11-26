@@ -53,6 +53,12 @@ impl ui_tree::Port for AppWindow {
     fn on_activated(&self, callback: impl Fn(String) + 'static) {
         self.on_tree_activated(move |id| callback(id.to_string()));
     }
+    fn on_drag_start_requested(&self, callback: impl Fn(String) + 'static) {
+        self.on_tree_drag_start_requested(move |id| callback(id.to_string()));
+    }
+    fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static) {
+        self.on_tree_context_menu_requested(move |id, x, y| callback(id.to_string(), x, y));
+    }
 }
 
 impl ui_list::Port for AppWindow {
@@ -515,6 +521,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let icons = icons.clone();
         move |event| {
             let reload_list = match event {
+                ui_tree::Event::DragStartRequested(_) | ui_tree::Event::ContextMenuRequested { .. } => return,
                 ui_tree::Event::Selected(id) | ui_tree::Event::Activated(id) => {
                     let navigated = model.borrow_mut().navigate(PathBuf::from(id));
                     if navigated {

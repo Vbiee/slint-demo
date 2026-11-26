@@ -5,7 +5,9 @@
 // selected and icon are caller-provided. A nonempty section labels that node's
 // section. Host decides which children are included and updates this model.
 // CALLBACKS: selected(id) on click; expansion-toggled(id) on expander click;
-// activated(id) on double-click. Wire required events and update the model;
+// activated(id) on double-click; drag-start-requested(id) after a 4px drag;
+// context-menu-requested(id, x, y) on right press (window coordinates).
+// Host decides selection, drag payload, menu and filesystem operations.
 // this component never fetches children, changes selection or navigates itself.
 // OPTIONS: content-min-width 320px, content-padding 6px, section-height 24px,
 // row-height 30px, indent-width 16px, icon-size 18px. Other row, font, color
@@ -119,13 +121,22 @@ export component UiTree inherits Rectangle {
     callback selected(string);
     callback expansion-toggled(string);
     callback activated(string);
+    callback drag-start-requested(string);
+    callback context-menu-requested(string, length, length);
+    // Viewport only; this does not identify the node under the pointer.
+    public pure function drop-viewport-hit(x: length, y: length) -> bool {
+        return x >= scroll.absolute-position.x && x < scroll.absolute-position.x + scroll.width
+            && y >= scroll.absolute-position.y && y < scroll.absolute-position.y + scroll.height
+            && !(scroll.content-height > scroll.visible-height && x >= scroll.absolute-position.x + scroll.width - max(root.scrollbar-grab-width, root.scrollbar-thumb-width) - root.scrollbar-inset)
+            && !(scroll.content-width > scroll.visible-width && y >= scroll.absolute-position.y + scroll.height - max(root.scrollbar-grab-width, root.scrollbar-thumb-width) - root.scrollbar-inset);
+    }
 
     background: root.tree-background-color;
     border-color: root.tree-border-color;
     border-width: root.tree-border-width;
     clip: true;
 
-    UiScrollView {
+    scroll := UiScrollView {
         width: parent.width;
         height: parent.height;
         thumb-width: root.scrollbar-thumb-width;
@@ -160,7 +171,28 @@ export component UiTree inherits Rectangle {
                     row-hover := TouchArea {
                         width: parent.width;
                         height: parent.height;
-                        clicked => { root.selected(node.id); }
+                        property <length> press-x;
+                        property <length> press-y;
+                        property <bool> drag-started: false;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                self.press-x = self.absolute-position.x + self.mouse-x;
+                                self.press-y = self.absolute-position.y + self.mouse-y;
+                                self.drag-started = false;
+                            }
+                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                                root.context-menu-requested(node.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                        moved => {
+                            if (self.pressed && !self.drag-started &&
+                                (abs(self.absolute-position.x + self.mouse-x - self.press-x) >= 4px ||
+                                 abs(self.absolute-position.y + self.mouse-y - self.press-y) >= 4px)) {
+                                self.drag-started = true;
+                                root.drag-start-requested(node.id);
+                            }
+                        }
+                        clicked => { if (!self.drag-started) { root.selected(node.id); } }
                         double-clicked => { root.activated(node.id); }
                     }
                     HorizontalLayout {

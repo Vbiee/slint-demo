@@ -15,6 +15,8 @@ mod ui_tree;
 mod ui_list;
 mod ui_tabs;
 mod ui_drag_drop;
+mod ui_shell_data;
+mod ui_clipboard;
 
 use std::{
     cell::{Cell, RefCell},
@@ -85,6 +87,8 @@ impl ui_tree::Port for AppWindow {
         self.on_explorer_tree_expansion_toggled(move |id| callback(id.to_string()));
     }
     fn on_activated(&self, callback: impl Fn(String) + 'static) { self.on_explorer_tree_activated(move |id| callback(id.to_string())); }
+    fn on_drag_start_requested(&self, callback: impl Fn(String) + 'static) { self.on_explorer_tree_drag_start_requested(move |id| callback(id.to_string())); }
+    fn on_context_menu_requested(&self, callback: impl Fn(String, f32, f32) + 'static) { self.on_explorer_tree_context_menu_requested(move |id, x, y| callback(id.to_string(), x, y)); }
 }
 
 impl ui_list::Port for AppWindow {
@@ -227,6 +231,16 @@ fn publish_selection(ui: &AppWindow, selection: &ExplorerSelection) {
     ui.set_explorer_operation_status(format!("{} selected", ids.len()).into());
 }
 
+// Diagnostic only: receiving a shortcut must not silently mutate the clipboard
+// or filesystem. The host can replace this with actual clipboard operations.
+fn clipboard_shortcut_status(command: i32, selected_count: usize) -> Option<String> {
+    match command {
+        3 => Some(format!("Ctrl+C received: {selected_count} selected (test only)")),
+        5 => Some("Ctrl+V received (test only; no files pasted)".into()),
+        _ => None,
+    }
+}
+
 fn refresh_explorer(ui: &AppWindow, model: &explorer_model::ExplorerModel, selected: &ExplorerSelection, expanded: &HashSet<String>, icons: &ExplorerIcons, reload_rows: bool) {
     ui.set_explorer_location(model.location().display().to_string().into());
     ui.set_explorer_list_focused_id(selected.focused_id.clone().into());
@@ -306,9 +320,48 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui_tree::Event::Selected(id) => model.borrow_mut().navigate(PathBuf::from(id)),
                 ui_tree::Event::ExpansionToggled(id) => { let mut set = expanded.borrow_mut(); if !set.insert(id.clone()) { set.remove(&id); } false }
                 ui_tree::Event::Activated(id) => model.borrow_mut().navigate(PathBuf::from(id)),
+                ui_tree::Event::DragStartRequested(_) | ui_tree::Event::ContextMenuRequested { .. } => return,
             };
             if reload { selected.borrow_mut().clear(); }
             if let Some(ui) = ui_weak.upgrade() { refresh_explorer(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &icons, reload); }
+        }
+    });
+    ui.on_explorer_tree_context_menu_requested({
+        let weak = ui.as_weak();
+        move |id, x, y| if let Some(ui) = weak.upgrade() {
+            ui.set_explorer_tree_menu_id(id);
+            ui.set_explorer_menu_is_tree(true);
+            ui.set_explorer_menu_x(x);
+            ui.set_explorer_menu_y(y);
+            ui.set_explorer_menu_open(true);
+        }
+    });
+    ui.on_explorer_tree_menu_open_requested({
+        let weak = ui.as_weak(); let model = explorer_model.clone(); let selected = explorer_selected.clone();
+        let expanded = explorer_expanded.clone(); let icons = explorer_icons.clone();
+        move |id| if model.borrow_mut().navigate(PathBuf::from(id.to_string())) {
+            selected.borrow_mut().clear();
+            if let Some(ui) = weak.upgrade() { refresh_explorer(&ui, &model.borrow(), &selected.borrow(), &expanded.borrow(), &icons, true); }
+        }
+    });
+    ui.on_explorer_tree_drag_start_requested({
+        let weak = ui.as_weak(); let drag_hwnd = drag_hwnd.clone();
+        move |id| if let Some(ui) = weak.upgrade() {
+            let Some(hwnd) = drag_hwnd.get() else { ui.set_explorer_operation_status("Native drag unavailable".into()); return; };
+            let result = ui_drag_drop::windows::start_file_drag(HWND(hwnd as *mut _), &[PathBuf::from(id.to_string())]);
+            slint::Timer::single_shot(std::time::Duration::ZERO, {
+                let weak = ui.as_weak();
+                move || if let Some(ui) = weak.upgrade() {
+                    ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                        position: slint::LogicalPosition::new(-1., -1.), button: slint::platform::PointerEventButton::Left,
+                    });
+                }
+            });
+            ui.set_explorer_operation_status(match result {
+                Ok(true) => "Tree drag completed (copy)".into(),
+                Ok(false) => "Tree drag cancelled".into(),
+                Err(error) => format!("Tree drag failed: {error}").into(),
+            });
         }
     });
     ui_list::bind(&ui, {
@@ -361,6 +414,7 @@ fn main() -> Result<(), slint::PlatformError> {
             ui_list::Event::ContextMenuRequested { id, x, y } => if let Some(ui) = ui_weak.upgrade() {
                 if !selected.borrow().ids.contains(&id) { selected.borrow_mut().replace(id); }
                 publish_selection(&ui, &selected.borrow());
+                ui.set_explorer_menu_is_tree(false);
                 ui.set_explorer_menu_x(x);
                 ui.set_explorer_menu_y(y);
                 ui.set_explorer_menu_open(true);
@@ -378,7 +432,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     _ => {}
                 }
                 publish_selection(&ui, &selected.borrow());
-                if (1..=5).contains(&command) {
+                if let Some(status) = clipboard_shortcut_status(command, selected.borrow().ids.len()) {
+                    ui.set_explorer_operation_status(status.into());
+                } else if (1..=5).contains(&command) {
                     let action = ["", "Rename", "Delete", "Copy", "Cut", "Paste"][command as usize];
                     ui.set_explorer_operation_status(format!("{action}: not implemented").into());
                 }
@@ -520,11 +576,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     let scale = ui.window().scale_factor();
                     ui.invoke_explorer_drop_hit(point.x as f32 / scale, point.y as f32 / scale)
                 }).unwrap_or(-1);
-                let accepted = target != -1;
+                let tree_target = position.is_some_and(|point| {
+                    let scale = ui.window().scale_factor();
+                    ui.invoke_explorer_tree_drop_hit(point.x as f32 / scale, point.y as f32 / scale)
+                });
+                let accepted = target != -1 || tree_target;
                 match event {
                     ui_drag_drop::Event::Enter { .. } | ui_drag_drop::Event::Over { .. } => {
                         ui.set_explorer_drop_feedback_index(target);
-                        ui.set_explorer_operation_status(if accepted { "Drop files here" } else { "Outside list" }.into());
+                        ui.set_explorer_operation_status(if tree_target { "Drop on tree (test only)" } else if accepted { "Drop files here" } else { "Outside list and tree" }.into());
                     }
                     ui_drag_drop::Event::Leave => {
                         ui.set_explorer_drop_feedback_index(-1);
@@ -607,6 +667,8 @@ mod tests {
         assert_eq!(ui.invoke_explorer_drop_hit(300., 245.), 1);
         assert_eq!(ui.invoke_explorer_drop_hit(300., 170.), -1); // header
         assert_eq!(ui.invoke_explorer_drop_hit(100., 205.), -1); // tree
+        assert!(ui.invoke_explorer_tree_drop_hit(100., 205.));
+        assert!(!ui.invoke_explorer_tree_drop_hit(300., 205.));
         assert_eq!(ui.invoke_explorer_drop_hit(300., 400.), -2); // empty list
         let pointer = |x, y| LogicalPosition::new(x, y);
         let press = |x, y| ui.window().dispatch_event(WindowEvent::PointerPressed { position: pointer(x, y), button: PointerEventButton::Left });
@@ -644,5 +706,30 @@ mod tests {
         motion(620., 205.); press(620., 205.); motion(630., 205.); release(630., 205.);
         assert_eq!(&*drags.borrow(), &["row-0", "row-0"]);
         assert!(selections.borrow().is_empty());
+
+        // Keyboard shortcuts are emitted only while list owns focus and Ctrl
+        // is held. Exercise the actual Slint input path, not direct callbacks.
+        let commands = Rc::new(RefCell::new(Vec::<i32>::new()));
+        ui.on_explorer_list_command_requested({
+            let commands = commands.clone(); let weak = ui.as_weak();
+            move |command| {
+                commands.borrow_mut().push(command);
+                if let (Some(ui), Some(status)) = (weak.upgrade(), clipboard_shortcut_status(command, 2)) {
+                    ui.set_explorer_operation_status(status.into());
+                }
+            }
+        });
+        motion(300., 205.); press(300., 205.); release(300., 205.);
+        let key_down = |text| ui.window().dispatch_event(WindowEvent::KeyPressed { text });
+        let key_up = |text| ui.window().dispatch_event(WindowEvent::KeyReleased { text });
+        key_down("c".into()); key_up("c".into());
+        assert!(commands.borrow().is_empty());
+        key_down(slint::platform::Key::Control.into());
+        key_down("c".into()); key_up("c".into());
+        assert_eq!(ui.get_explorer_operation_status(), "Ctrl+C received: 2 selected (test only)");
+        key_down("V".into()); key_up("V".into());
+        key_up(slint::platform::Key::Control.into());
+        assert_eq!(&*commands.borrow(), &[3, 5]);
+        assert_eq!(ui.get_explorer_operation_status(), "Ctrl+V received (test only; no files pasted)");
     }
 }

@@ -3,21 +3,21 @@
 //! the callback has actually accepted the payload; it never reports MOVE.
 
 use super::{Event, Point};
-use std::{cell::RefCell, ffi::OsString, os::windows::ffi::{OsStrExt, OsStringExt}, path::{Path, PathBuf}, rc::Rc};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use crate::ui_shell_data::{read_paths, shell_data_object};
 use windows::{
-    core::{implement, PCWSTR, Ref, Result},
+    core::{implement, Ref, Result},
     Win32::{
-        Foundation::{HWND, POINT, POINTL, S_OK},
+        Foundation::{HWND, POINT, POINTL},
         Graphics::Gdi::ScreenToClient,
         System::{
-            Com::{CoTaskMemFree, DVASPECT_CONTENT, FORMATETC, IBindCtx, IDataObject, TYMED_HGLOBAL},
-            Ole::{CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE, IDropTarget,
+            Com::IDataObject,
+            Ole::{DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE, IDropTarget,
                 IDropSource, IDropTarget_Impl, OleInitialize, OleUninitialize, RegisterDragDrop,
-                ReleaseStgMedium, RevokeDragDrop},
+                RevokeDragDrop},
             SystemServices::MODIFIERKEYS_FLAGS,
         },
-        UI::Shell::{Common::ITEMIDLIST, DragQueryFileW, HDROP, ILFindLastID,
-            SHCreateDataObject, SHDoDragDrop, SHParseDisplayName},
+        UI::Shell::SHDoDragDrop,
     },
 };
 
@@ -36,28 +36,6 @@ fn client_point(hwnd: HWND, point: &POINTL) -> Point {
     Point { x: position.x, y: position.y }
 }
 
-fn read_paths(data: &IDataObject) -> Vec<PathBuf> {
-    let format = FORMATETC { cfFormat: CF_HDROP.0, ptd: std::ptr::null_mut(),
-        dwAspect: DVASPECT_CONTENT.0, lindex: -1, tymed: TYMED_HGLOBAL.0 as u32 };
-    unsafe {
-        if data.QueryGetData(&format) != S_OK { return Vec::new(); }
-        let Ok(mut medium) = data.GetData(&format) else { return Vec::new(); };
-        if medium.tymed != TYMED_HGLOBAL.0 as u32 { ReleaseStgMedium(&mut medium); return Vec::new(); }
-        if medium.u.hGlobal.is_invalid() { ReleaseStgMedium(&mut medium); return Vec::new(); }
-        let hdrop = HDROP(medium.u.hGlobal.0);
-        let count = DragQueryFileW(hdrop, u32::MAX, None);
-        let mut paths = Vec::with_capacity(count as usize);
-        for index in 0..count {
-            let length = DragQueryFileW(hdrop, index, None) as usize;
-            let mut buffer = vec![0u16; length + 1];
-            if DragQueryFileW(hdrop, index, Some(&mut buffer)) > 0 {
-                paths.push(PathBuf::from(OsString::from_wide(&buffer[..length])));
-            }
-        }
-        ReleaseStgMedium(&mut medium);
-        paths
-    }
-}
 
 fn notify(handler: &Handler, event: Event) -> bool {
     // Never unwind Rust panics through an OLE/COM callback.
@@ -122,27 +100,6 @@ impl Drop for WindowDropTarget {
 /// Ask the Windows Shell to start a native copy drag for existing paths sharing
 /// a parent directory. Must run on the OLE UI thread while the mouse is down.
 /// The Shell owns its drag loop; caller must not delete/move sources on return.
-fn shell_data_object(paths: &[PathBuf]) -> std::result::Result<IDataObject, String> {
-    let Some(parent) = paths.first().and_then(|path| path.parent()) else { return Err("No file paths".into()); };
-    if paths.iter().any(|path| !path.is_absolute() || path.parent() != Some(parent) || !path.exists()) {
-        return Err("Drag paths must exist and share one parent folder".into());
-    }
-    struct Pidl(*mut ITEMIDLIST);
-    impl Drop for Pidl { fn drop(&mut self) { unsafe { CoTaskMemFree(Some(self.0.cast())); } } }
-    fn parse(path: &Path) -> std::result::Result<Pidl, String> {
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let mut id = std::ptr::null_mut();
-        unsafe { SHParseDisplayName(PCWSTR(wide.as_ptr()), None::<&IBindCtx>, &mut id, 0, None) }
-            .map_err(|error| error.to_string())?;
-        if id.is_null() { return Err("Shell returned an empty item ID".into()); }
-        Ok(Pidl(id))
-    }
-    let parent_id = parse(parent)?;
-    let item_ids = paths.iter().map(|path| parse(path)).collect::<std::result::Result<Vec<_>, _>>()?;
-    let children: Vec<*const ITEMIDLIST> = item_ids.iter().map(|id| unsafe { ILFindLastID(id.0) as *const _ }).collect();
-    unsafe { SHCreateDataObject(Some(parent_id.0), Some(&children), None::<&IDataObject>) }
-        .map_err(|error| error.to_string())
-}
 
 pub fn start_file_drag(hwnd: HWND, paths: &[PathBuf]) -> std::result::Result<bool, String> {
     let data = shell_data_object(paths)?;
