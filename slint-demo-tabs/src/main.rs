@@ -14,6 +14,7 @@ mod ui_tree;
 #[path = "../../slint-demo-explorer/src/ui_list.rs"]
 mod ui_list;
 mod ui_tabs;
+mod ui_drag_drop;
 
 use std::{
     cell::{Cell, RefCell},
@@ -23,6 +24,8 @@ use std::{
 };
 
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
+use slint::winit_030::{winit::{platform::windows::WindowAttributesExtWindows, raw_window_handle::{HasWindowHandle, RawWindowHandle}}, WinitWindowAccessor};
+use windows::Win32::Foundation::HWND;
 use ui_slint_win32_control::{Options as WindowChromeOptions, UiSlintWin32Control};
 
 slint::include_modules!();
@@ -244,7 +247,10 @@ fn refresh_explorer(ui: &AppWindow, model: &explorer_model::ExplorerModel, selec
 }
 
 fn main() -> Result<(), slint::PlatformError> {
-    UiSlintWin32Control::select_backend()?;
+    // Share the frame's transparent-window configuration with OLE DnD. Winit
+    // otherwise registers its own IDropTarget for this HWND before our module.
+    slint::BackendSelector::new().with_winit_window_attributes_hook(|attributes|
+        attributes.with_transparent(true).with_drag_and_drop(false)).select()?;
     let ui = AppWindow::new()?;
     let window_control = UiSlintWin32Control::new(WindowChromeOptions {
         frame: ui_slint_win32_frame::FrameConfig {
@@ -268,6 +274,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let explorer_expanded = Rc::new(RefCell::new(HashSet::<String>::new()));
     let explorer_columns_state = Rc::new(RefCell::new(explorer_columns()));
     let explorer_icons = Rc::new(ExplorerIcons::load());
+    let drag_hwnd = Rc::new(Cell::new(None::<isize>));
+    let received_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
     for ancestor in explorer_model.borrow().location().ancestors().skip(1) {
         explorer_expanded.borrow_mut().insert(path_id(ancestor));
     }
@@ -306,6 +314,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui_list::bind(&ui, {
         let ui_weak = ui.as_weak(); let model = explorer_model.clone(); let selected = explorer_selected.clone();
         let expanded = explorer_expanded.clone(); let icons = explorer_icons.clone(); let columns = explorer_columns_state.clone();
+        let drag_hwnd = drag_hwnd.clone();
         move |event| match event {
             ui_list::Event::Selected(id) => if let Some(ui) = ui_weak.upgrade() {
                 selected.borrow_mut().replace(id);
@@ -316,7 +325,31 @@ fn main() -> Result<(), slint::PlatformError> {
                 publish_selection(&ui, &selected.borrow());
             },
             ui_list::Event::DragStartRequested(id) => if let Some(ui) = ui_weak.upgrade() {
-                ui.set_explorer_operation_status(format!("Drag start: {} selected ({})", selected.borrow().ids.len(), path_label(Path::new(&id))).into());
+                let paths = selected.borrow().ids.iter().map(PathBuf::from).collect::<Vec<_>>();
+                let Some(hwnd) = drag_hwnd.get() else {
+                    ui.set_explorer_operation_status("Native drag unavailable".into());
+                    return;
+                };
+                ui.set_explorer_operation_status(format!("Dragging {} item(s): {}", paths.len(), path_label(Path::new(&id))).into());
+                let drag_result = ui_drag_drop::windows::start_file_drag(HWND(hwnd as *mut _), &paths);
+                // OLE owns the mouse release while its nested drag loop runs.
+                // Release Slint's pressed TouchArea after this callback returns;
+                // an offscreen release cannot turn the completed drag into click.
+                slint::Timer::single_shot(std::time::Duration::ZERO, {
+                    let ui_weak = ui.as_weak();
+                    move || if let Some(ui) = ui_weak.upgrade() {
+                        ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                            position: slint::LogicalPosition::new(-1., -1.),
+                            button: slint::platform::PointerEventButton::Left,
+                        });
+                    }
+                });
+                let status = match drag_result {
+                    Ok(true) => "Drag completed (copy)",
+                    Ok(false) => "Drag cancelled",
+                    Err(ref error) => { ui.set_explorer_operation_status(format!("Drag failed: {error}").into()); return; }
+                };
+                ui.set_explorer_operation_status(status.into());
             },
             ui_list::Event::SelectionDragged(id) => if let Some(ui) = ui_weak.upgrade() {
                 ui.set_explorer_operation_status(format!("Selecting: {} selected ({})", selected.borrow().ids.len(), path_label(Path::new(&id))).into());
@@ -456,7 +489,71 @@ fn main() -> Result<(), slint::PlatformError> {
     window_control.install(&ui.window());
     ui.show()?;
     window_control.after_show(&ui.window());
-    ui.run()
+    // Winit may not create its HWND until the event loop starts. Use a timer,
+    // not on_winit_window_event: that API has one filter and the frame owns it.
+    let target_guard = Rc::new(RefCell::new(None::<ui_drag_drop::windows::WindowDropTarget>));
+    let install_timer = Rc::new(slint::Timer::default());
+    install_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), {
+        let ui_weak = ui.as_weak();
+        let guard = target_guard.clone();
+        let received = received_paths.clone();
+        let drag_hwnd = drag_hwnd.clone();
+        let timer_weak = Rc::downgrade(&install_timer);
+        move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                if let Some(timer) = timer_weak.upgrade() { timer.stop(); }
+                return;
+            };
+            let hwnd = ui.window().with_winit_window(|window| window.window_handle().ok().and_then(|handle|
+                match handle.as_raw() { RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()), _ => None })).flatten();
+            let Some(raw_hwnd) = hwnd else { return; };
+            let target_ui = ui_weak.clone();
+            let received = received.clone();
+            match ui_drag_drop::windows::WindowDropTarget::register(HWND(raw_hwnd as *mut _), move |event| {
+                let Some(ui) = target_ui.upgrade() else { return false; };
+                let position = match &event {
+                    ui_drag_drop::Event::Enter { position, .. } | ui_drag_drop::Event::Over { position }
+                    | ui_drag_drop::Event::Drop { position, .. } => Some(*position),
+                    ui_drag_drop::Event::Leave => None,
+                };
+                let target = position.map(|point| {
+                    let scale = ui.window().scale_factor();
+                    ui.invoke_explorer_drop_hit(point.x as f32 / scale, point.y as f32 / scale)
+                }).unwrap_or(-1);
+                let accepted = target != -1;
+                match event {
+                    ui_drag_drop::Event::Enter { .. } | ui_drag_drop::Event::Over { .. } => {
+                        ui.set_explorer_drop_feedback_index(target);
+                        ui.set_explorer_operation_status(if accepted { "Drop files here" } else { "Outside list" }.into());
+                    }
+                    ui_drag_drop::Event::Leave => {
+                        ui.set_explorer_drop_feedback_index(-1);
+                        ui.set_explorer_operation_status("Drag left list".into());
+                    }
+                    ui_drag_drop::Event::Drop { paths, .. } => {
+                        ui.set_explorer_drop_feedback_index(-1);
+                        if accepted {
+                            let count = paths.len();
+                            *received.borrow_mut() = paths;
+                            ui.set_explorer_operation_status(format!("Received {count} path(s); no files copied").into());
+                        }
+                    }
+                }
+                accepted
+            }) {
+                Ok(target) => {
+                    drag_hwnd.set(Some(raw_hwnd));
+                    *guard.borrow_mut() = Some(target);
+                }
+                Err(error) => ui.set_explorer_operation_status(format!("Native drop unavailable: {error}").into()),
+            }
+            if let Some(timer) = timer_weak.upgrade() { timer.stop(); }
+        }
+    });
+    let result = ui.run();
+    install_timer.stop();
+    drop(target_guard.borrow_mut().take());
+    result
 }
 
 #[cfg(test)]
@@ -506,6 +603,11 @@ mod tests {
         ui.on_explorer_list_selection_requested({ let events = selections.clone(); move |id, mode| events.borrow_mut().push((id.to_string(), mode)) });
         ui.on_explorer_list_selection_dragged({ let events = range.clone(); move |id| events.borrow_mut().push(id.to_string()) });
         ui.show().unwrap();
+        assert_eq!(ui.invoke_explorer_drop_hit(300., 205.), 0);
+        assert_eq!(ui.invoke_explorer_drop_hit(300., 245.), 1);
+        assert_eq!(ui.invoke_explorer_drop_hit(300., 170.), -1); // header
+        assert_eq!(ui.invoke_explorer_drop_hit(100., 205.), -1); // tree
+        assert_eq!(ui.invoke_explorer_drop_hit(300., 400.), -2); // empty list
         let pointer = |x, y| LogicalPosition::new(x, y);
         let press = |x, y| ui.window().dispatch_event(WindowEvent::PointerPressed { position: pointer(x, y), button: PointerEventButton::Left });
         let motion = |x, y| ui.window().dispatch_event(WindowEvent::PointerMoved { position: pointer(x, y) });

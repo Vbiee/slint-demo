@@ -31,6 +31,10 @@
 // - drag-start-requested(id): selected row dragged from a primary field; host
 //   resolves the current selected IDs and decides what to do. No native DnD.
 // - selection-dragged(id): range-selection gesture reached ID (for feedback).
+// - drop-hit-test(window-x, window-y): row index, -2 empty viewport, or -1
+//   outside/scrollbar; caller supplies window-relative logical coordinates.
+//   Set drop-feedback-index to that index to render caller-approved feedback;
+//   -1 clears it. List neither receives native data nor performs file actions.
 // - selected(id): exposed for compatibility, but not emitted by this component.
 //
 // OPTIONAL INPUTS: header-height 32px, row-height 34px, row-gap 2px,
@@ -270,6 +274,32 @@ export component UiList inherits Rectangle {
     callback column-resized(string, length);
     callback drag-start-requested(string);
     callback selection-dragged(string);
+    // Caller-owned external drop feedback: -1 none, -2 viewport, >=0 row index.
+    in property <int> drop-feedback-index: -1;
+    in property <color> drop-feedback-color: #385c83;
+    // Window-relative logical position -> row index, -2 for empty viewport,
+    // -1 outside the row viewport. This is data-agnostic: caller decides
+    // whether an entry is a valid drop destination.
+    public pure function drop-hit-test(window-x: length, window-y: length) -> int {
+        if (window-x < list.absolute-position.x || window-x >= list.absolute-position.x + list.width
+            || window-y < list.absolute-position.y || window-y >= list.absolute-position.y + list.height) {
+            return -1;
+        }
+        // The project scrollbar uses an overlay hit area: do not advertise it
+        // as an entry destination while the corresponding scrollbar is shown.
+        if (list.content-height > list.visible-height
+            && window-x >= list.absolute-position.x + list.width - 13px
+            && window-x < list.absolute-position.x + list.width - 3px) {
+            return -1;
+        }
+        if (list.content-width > list.visible-width
+            && window-y >= list.absolute-position.y + list.height - 13px
+            && window-y < list.absolute-position.y + list.height - 3px) {
+            return -1;
+        }
+        let index = floor((window-y - list.absolute-position.y - root.content-y) / (root.row-height + root.row-gap));
+        return index >= 0 && index < root.rows.length ? index : -2;
+    }
 
     background: #171a21;
     // Debug boundary: this is the complete area owned and painted by UiList.
@@ -463,7 +493,7 @@ export component UiList inherits Rectangle {
                     y: root.row-gap / 2;
                     height: root.row-height;
                     width: parent.width;
-                    background: row.selected ? root.selected-row-color
+                    background: root.drop-feedback-index == index ? root.drop-feedback-color : row.selected ? root.selected-row-color
                         : ((row-hover.has-hover || self.primary-hover) ? root.hover-row-color : transparent);
                     border-radius: root.row-corner-radius;
                     border-color: root.focused-id == row.id && focus-scope.has-focus
@@ -552,6 +582,15 @@ export component UiList inherits Rectangle {
                     }
                 }
             }
+    }
+    if root.drop-feedback-index == -2 : Rectangle {
+        x: list.x;
+        y: list.y;
+        width: list.width;
+        height: list.height;
+        background: transparent;
+        border-width: 2px;
+        border-color: root.drop-feedback-color;
     }
     status-bar := Rectangle {
         visible: root.status-visible;

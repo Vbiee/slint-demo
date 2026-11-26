@@ -28,6 +28,7 @@ export component AppWindow inherits Window {
     in-out property <string> explorer-list-focused-id;
     in-out property <string> explorer-location;
     in-out property <string> explorer-operation-status;
+    in-out property <int> explorer-drop-feedback-index: -1;
     in-out property <bool> explorer-menu-open: false;
     in-out property <length> explorer-menu-x;
     in-out property <length> explorer-menu-y;
@@ -53,6 +54,16 @@ export component AppWindow inherits Window {
     callback window-minimize-requested();
     callback window-maximize-requested();
     callback window-close-requested();
+    public pure function explorer-drop-hit(x: length, y: length) -> int {
+        if (root.primary-active-tab-id == "explorer"
+            && x >= primary-group.absolute-position.x + primary-group.content-x
+            && y >= primary-group.absolute-position.y + primary-group.content-y
+            && x < primary-group.absolute-position.x + primary-group.content-x + primary-group.content-width
+            && y < primary-group.absolute-position.y + primary-group.content-y + primary-group.content-height) {
+            return explorer-list.drop-hit-test(x, y);
+        }
+        return -1;
+    }
 
     Rectangle {
         background: #171b22;
@@ -129,14 +140,15 @@ export component AppWindow inherits Window {
                 split-enabled: root.split-enabled;
                 split-ratio <=> root.split-ratio;
                 split-ratio-changed(ratio) => { root.split-ratio-changed(ratio); }
-                UiTabGroup {
+                primary-group := UiTabGroup {
                     x: workspace.first-pane-x;
                     y: workspace.first-pane-y;
                     width: workspace.first-pane-width;
                     height: workspace.first-pane-height;
                     tabs: root.primary-tabs;
                     active-id <=> root.primary-active-tab-id;
-                    if root.primary-active-tab-id == "explorer" : Rectangle {
+                    Rectangle {
+                        visible: root.primary-active-tab-id == "explorer";
                         // It deliberately occupies the viewport it receives
                         // from the tab. UiTree and UiList keep their own
                         // scrolling/input behavior inside this document.
@@ -191,11 +203,12 @@ export component AppWindow inherits Window {
                                     expansion-toggled(id) => { root.explorer-tree-expansion-toggled(id); }
                                     activated(id) => { root.explorer-tree-activated(id); }
                                 }
-                                UiList {
+                                explorer-list := UiList {
                                     horizontal-stretch: 1;
                                     columns: root.explorer-list-columns;
                                     rows: root.explorer-list-rows;
                                     focused-id: root.explorer-list-focused-id;
+                                    drop-feedback-index: root.explorer-drop-feedback-index;
                                     corner-radius: 6px;
                                     status-visible: true;
                                     // Its contents remain caller-owned even
